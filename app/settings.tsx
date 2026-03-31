@@ -11,9 +11,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Avatar from '../../components/common/Avatar';
+import Avatar from '../components/common/Avatar';
 import { isAdminOrManager } from '@/lib/roles';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 
 export default function Settings() {
   const { user, logout, deleteAccount } = useAuth();
@@ -88,18 +88,6 @@ export default function Settings() {
 
   const settingsOptions = [
     {
-      id: 'profile',
-      title: 'Profile Settings',
-      icon: 'person-outline',
-      onPress: () => Alert.alert('Coming Soon', 'Profile settings coming soon!'),
-    },
-    {
-      id: 'notifications',
-      title: 'Notification Preferences',
-      icon: 'notifications-outline',
-      onPress: () => Alert.alert('Coming Soon', 'Notification preferences coming soon!'),
-    },
-    {
       id: 'security',
       title: 'Update Password',
       icon: 'shield-checkmark-outline',
@@ -139,6 +127,9 @@ export default function Settings() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 16 }}>
+          <Ionicons name="arrow-back" size={26} color="#000" />
+        </TouchableOpacity>
         <Text style={styles.title}>Settings</Text>
       </View>
 
@@ -205,13 +196,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F8F8',
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 60,
-    paddingBottom: 20,
+    paddingBottom: 16,
     backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
   },
   title: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#000000',
   },
@@ -221,15 +216,18 @@ const styles = StyleSheet.create({
   profileCard: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    marginHorizontal: 20,
+    marginHorizontal: 16,
     marginTop: 20,
-    padding: 20,
+    padding: 24,
     borderRadius: 16,
+    alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   profileInfo: {
     marginLeft: 16,

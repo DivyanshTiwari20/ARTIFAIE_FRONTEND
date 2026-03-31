@@ -1,553 +1,292 @@
-import { getClientBilling, getReceivables } from '@/services/api';
+import { getClient, updateClient, deleteClient } from '@/services/api';
+import { DetailSkeleton } from '@/components/common/Skeleton';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  RefreshControl,
+  Alert,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 
-const formatINR = (amount: number): string => {
-  if (!amount && amount !== 0) return '₹0';
-  return '₹' + Math.abs(amount).toLocaleString('en-IN');
-};
-
-const formatDate = (dateStr: string): string => {
-  if (!dateStr) return '-';
-  if (dateStr.length === 8 && !dateStr.includes('-')) {
-    const y = dateStr.substring(0, 4);
-    const m = dateStr.substring(4, 6);
-    const d = dateStr.substring(6, 8);
-    return `${d}/${m}/${y}`;
-  }
-  if (dateStr.includes('-')) {
-    const parts = dateStr.split('-');
-    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
-  }
-  return dateStr;
-};
-
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case 'Paid': return { bg: '#dcfce7', text: '#16a34a' };
-    case 'Partial': return { bg: '#fef3c7', text: '#d97706' };
-    case 'Unpaid': return { bg: '#fee2e2', text: '#dc2626' };
-    case 'Overdue': return { bg: '#fecaca', text: '#991b1b' };
-    default: return { bg: '#f3f4f6', text: '#6b7280' };
-  }
-};
-
-interface ClientInvoice {
-  voucherNumber: string;
-  date: string;
-  clientName: string;
-  narration: string;
-  grossAmount: string;
-  outstandingAmount: string;
-  paymentStatus: string;
-  amountCollected: number;
-}
-
-interface ClientReceivable {
-  clientName: string;
-  billRef: string;
-  billDate: string;
-  dueDate: string;
-  billAmount: string;
-  pendingAmount: string;
-  daysOverdue: number;
-  isOverdue: boolean;
-  ageingBucket: string;
-  dueDateFormatted: string;
-}
-
 export default function ClientDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ clientName?: string; id?: string }>();
-  const clientName = params.clientName ? decodeURIComponent(params.clientName) : '';
+  const clientId = params.id as string;
 
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [client, setClient] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [invoices, setInvoices] = useState<ClientInvoice[]>([]);
-  const [receivables, setReceivables] = useState<ClientReceivable[]>([]);
-  const [realisationRate, setRealisationRate] = useState(0);
-  const [totalBilled, setTotalBilled] = useState(0);
-  const [totalCollected, setTotalCollected] = useState(0);
-  const [summary, setSummary] = useState({ paidCount: 0, partialCount: 0, unpaidCount: 0, totalInvoices: 0 });
+  // Edit modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [editContactPerson, setEditContactPerson] = useState('');
+  const [editLicenseNum, setEditLicenseNum] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchClientData = useCallback(async () => {
-    if (!clientName) return;
+  const fetchClient = useCallback(async () => {
+    if (!clientId) {
+      setError('No client ID provided');
+      setIsLoading(false);
+      return;
+    }
     try {
       setError(null);
-      const [billingRes, receivablesRes] = await Promise.allSettled([
-        getClientBilling(clientName),
-        getReceivables(),
-      ]);
-
-      // Process billing
-      if (billingRes.status === 'fulfilled' && billingRes.value.success) {
-        const data = billingRes.value.data;
-        setInvoices(data?.invoices || []);
-        setSummary(data?.summary || { paidCount: 0, partialCount: 0, unpaidCount: 0, totalInvoices: 0 });
-
-        const clientRate = (data?.clientRealisationRates || []).find(
-          (r: any) => r.clientName === clientName
-        );
-        if (clientRate) {
-          setRealisationRate(clientRate.feeRealisationRatePercent);
-          setTotalBilled(clientRate.totalBilled);
-          setTotalCollected(clientRate.totalCollected);
-        }
-      }
-
-      // Process receivables — filter by client name
-      if (receivablesRes.status === 'fulfilled' && receivablesRes.value.success) {
-        const allBills = receivablesRes.value.data?.bills || [];
-        const clientBills = allBills.filter(
-          (b: any) => b.clientName?.toLowerCase() === clientName.toLowerCase()
-        );
-        setReceivables(clientBills);
+      const res = await getClient(clientId);
+      if (res.success && res.data) {
+        setClient(res.data);
+      } else {
+        setError('Client not found');
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load client data');
+      setError(err.message || 'Failed to load client');
     } finally {
       setIsLoading(false);
-      setIsRefreshing(false);
     }
-  }, [clientName]);
+  }, [clientId]);
 
   useEffect(() => {
-    fetchClientData();
-  }, [fetchClientData]);
+    fetchClient();
+  }, [fetchClient]);
 
-  const onRefresh = useCallback(() => {
-    setIsRefreshing(true);
-    fetchClientData();
-  }, [fetchClientData]);
+  const openEditModal = () => {
+    if (!client) return;
+    setEditName(client.name || '');
+    setEditEmail(client.email || '');
+    setEditPhone(client.phone || '');
+    setEditLocation(client.location || '');
+    setEditContactPerson(client.contactPerson || '');
+    setEditLicenseNum(client.licenseNum || '');
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editName.trim()) {
+      Alert.alert('Error', 'Name is required');
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const res = await updateClient(clientId, {
+        name: editName,
+        email: editEmail,
+        phone: editPhone,
+        location: editLocation,
+        contactPerson: editContactPerson,
+        licenseNum: editLicenseNum,
+      });
+      if (res.success) {
+        setClient(res.data);
+        setShowEditModal(false);
+        Alert.alert('Success', 'Client updated');
+      } else {
+        Alert.alert('Error', res.message || 'Failed to update');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to update client');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = () => {
+    Alert.alert(
+      'Delete Client',
+      `Are you sure you want to delete "${client?.name}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await deleteClient(clientId);
+              if (res.success) {
+                Alert.alert('Deleted', 'Client has been deleted');
+                router.back();
+              } else {
+                Alert.alert('Error', res.message || 'Failed to delete');
+              }
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Failed to delete client');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return 'N/A';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
 
   if (isLoading) {
-    return (
-      <View style={[styles.container, styles.centerState]}>
-        <ActivityIndicator size="large" color="#000" />
-        <Text style={styles.stateText}>Loading client data...</Text>
-      </View>
-    );
+    return <DetailSkeleton />;
   }
 
-  if (error) {
+  if (error || !client) {
     return (
       <View style={[styles.container, styles.centerState]}>
-        <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
-        <Text style={styles.stateText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={fetchClientData}>
-          <Text style={styles.retryButtonText}>Retry</Text>
+        <Ionicons name="alert-circle-outline" size={48} color="#FF3B30" />
+        <Text style={styles.stateText}>{error || 'Client not found'}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => router.back()}>
+          <Text style={styles.retryButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  const pendingAmount = totalBilled - totalCollected;
-
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
-    >
+    <ScrollView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#3b82f6" />
+          <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{clientName?.charAt(0)?.toUpperCase() || 'C'}</Text>
+          <Text style={styles.avatarText}>
+            {client.name?.charAt(0)?.toUpperCase() || 'C'}
+          </Text>
         </View>
-        <Text style={styles.name}>{clientName}</Text>
+        <Text style={styles.name}>{client.name}</Text>
         <View style={styles.statusBadge}>
           <Text style={styles.statusText}>Client</Text>
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.editButton} onPress={openEditModal}>
+            <Ionicons name="create-outline" size={18} color="#FFF" />
+            <Text style={styles.editButtonText}>Edit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+            <Ionicons name="trash-outline" size={18} color="#FFF" />
+            <Text style={styles.deleteButtonText}>Delete</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.content}>
-        {/* Financial Summary Card */}
+        {/* Client Info Card */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Financial Summary</Text>
-          <View style={styles.financialGrid}>
-            <View style={styles.financialItem}>
-              <Text style={styles.financialLabel}>Total Billed</Text>
-              <Text style={styles.financialValue}>{formatINR(totalBilled)}</Text>
-            </View>
-            <View style={styles.financialItem}>
-              <Text style={styles.financialLabel}>Collected</Text>
-              <Text style={[styles.financialValue, { color: '#16a34a' }]}>
-                {formatINR(totalCollected)}
-              </Text>
-            </View>
-            <View style={styles.financialItem}>
-              <Text style={styles.financialLabel}>Pending</Text>
-              <Text style={[styles.financialValue, { color: '#dc2626' }]}>
-                {formatINR(pendingAmount)}
-              </Text>
-            </View>
-            <View style={styles.financialItem}>
-              <Text style={styles.financialLabel}>Realisation</Text>
-              <Text style={[styles.financialValue, {
-                color: realisationRate >= 80 ? '#16a34a' : realisationRate >= 50 ? '#d97706' : '#dc2626'
-              }]}>
-                {realisationRate.toFixed(1)}%
-              </Text>
-            </View>
+          <Text style={styles.cardTitle}>Client Information</Text>
+          <View style={styles.infoGrid}>
+            <InfoRow icon="mail-outline" label="Email" value={client.email || 'N/A'} />
+            <InfoRow icon="call-outline" label="Phone" value={client.phone || 'N/A'} />
+            <InfoRow icon="location-outline" label="Location" value={client.location || 'N/A'} />
+            <InfoRow icon="person-outline" label="Contact Person" value={client.contactPerson || 'N/A'} />
+            <InfoRow icon="document-text-outline" label="License No." value={client.licenseNum || 'N/A'} />
+            <InfoRow icon="calendar-outline" label="License Expire" value={formatDate(client.licenseExpire)} />
+            <InfoRow icon="time-outline" label="Added On" value={formatDate(client.createdAt)} />
           </View>
-
-          {/* Realisation Progress Bar */}
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, {
-              width: `${Math.min(realisationRate, 100)}%`,
-              backgroundColor: realisationRate >= 80 ? '#16a34a'
-                : realisationRate >= 50 ? '#d97706' : '#dc2626',
-            }]} />
-          </View>
-        </View>
-
-        {/* Invoice Summary Chips */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Invoice Summary</Text>
-          <View style={styles.chipRow}>
-            <View style={[styles.summaryChip, { backgroundColor: '#f0f0f0' }]}>
-              <Text style={styles.chipLabel}>Total</Text>
-              <Text style={styles.chipValue}>{summary.totalInvoices}</Text>
-            </View>
-            <View style={[styles.summaryChip, { backgroundColor: '#dcfce7' }]}>
-              <Text style={styles.chipLabel}>Paid</Text>
-              <Text style={[styles.chipValue, { color: '#16a34a' }]}>{summary.paidCount}</Text>
-            </View>
-            <View style={[styles.summaryChip, { backgroundColor: '#fef3c7' }]}>
-              <Text style={styles.chipLabel}>Partial</Text>
-              <Text style={[styles.chipValue, { color: '#d97706' }]}>{summary.partialCount}</Text>
-            </View>
-            <View style={[styles.summaryChip, { backgroundColor: '#fee2e2' }]}>
-              <Text style={styles.chipLabel}>Unpaid</Text>
-              <Text style={[styles.chipValue, { color: '#dc2626' }]}>{summary.unpaidCount}</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Outstanding Receivables */}
-        {receivables.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Outstanding Receivables</Text>
-            {receivables.map((bill, index) => (
-              <View key={`${bill.billRef}-${index}`} style={styles.receivableItem}>
-                <View style={styles.receivableHeader}>
-                  <Text style={styles.receivableRef}>{bill.billRef || '-'}</Text>
-                  {bill.isOverdue && (
-                    <View style={styles.overdueBadge}>
-                      <Text style={styles.overdueText}>{bill.daysOverdue}d overdue</Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.receivableRow}>
-                  <Text style={styles.receivableLabel}>Amount: {formatINR(parseFloat(bill.billAmount) || 0)}</Text>
-                  <Text style={[styles.receivableLabel, { color: '#dc2626' }]}>
-                    Pending: {formatINR(parseFloat(bill.pendingAmount) || 0)}
-                  </Text>
-                </View>
-                <Text style={styles.receivableDate}>
-                  Due: {bill.dueDateFormatted || formatDate(bill.dueDate)} • Bucket: {bill.ageingBucket}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Invoices List */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>All Invoices ({invoices.length})</Text>
-          {invoices.length === 0 ? (
-            <Text style={styles.emptyText}>No invoices found for this client</Text>
-          ) : (
-            invoices.map((inv, index) => {
-              const statusColor = getStatusColor(inv.paymentStatus);
-              return (
-                <View key={`${inv.voucherNumber}-${index}`} style={styles.invoiceItem}>
-                  <View style={styles.invoiceHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.invoiceNumber}>{inv.voucherNumber}</Text>
-                      <Text style={styles.invoiceDate}>{formatDate(inv.date)}</Text>
-                    </View>
-                    <View style={[styles.invoiceStatusBadge, { backgroundColor: statusColor.bg }]}>
-                      <Text style={[styles.invoiceStatusText, { color: statusColor.text }]}>
-                        {inv.paymentStatus}
-                      </Text>
-                    </View>
-                  </View>
-                  {inv.narration ? (
-                    <Text style={styles.invoiceNarration} numberOfLines={1}>{inv.narration}</Text>
-                  ) : null}
-                  <View style={styles.invoiceAmounts}>
-                    <Text style={styles.invoiceAmount}>
-                      Amount: {formatINR(parseFloat(inv.grossAmount) || 0)}
-                    </Text>
-                    <Text style={[styles.invoiceAmount, { color: '#16a34a' }]}>
-                      Collected: {formatINR(inv.amountCollected || 0)}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })
-          )}
         </View>
       </View>
 
       <View style={{ height: 40 }} />
+
+      {/* Edit Modal */}
+      <Modal visible={showEditModal} animationType="slide" transparent onRequestClose={() => setShowEditModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Edit Client</Text>
+
+            <Text style={styles.modalLabel}>Name *</Text>
+            <TextInput style={styles.modalInput} value={editName} onChangeText={setEditName} placeholder="Client name" />
+
+            <Text style={styles.modalLabel}>Email</Text>
+            <TextInput style={styles.modalInput} value={editEmail} onChangeText={setEditEmail} placeholder="Email" keyboardType="email-address" />
+
+            <Text style={styles.modalLabel}>Phone</Text>
+            <TextInput style={styles.modalInput} value={editPhone} onChangeText={setEditPhone} placeholder="Phone" keyboardType="phone-pad" />
+
+            <Text style={styles.modalLabel}>Location</Text>
+            <TextInput style={styles.modalInput} value={editLocation} onChangeText={setEditLocation} placeholder="Location" />
+
+            <Text style={styles.modalLabel}>Contact Person</Text>
+            <TextInput style={styles.modalInput} value={editContactPerson} onChangeText={setEditContactPerson} placeholder="Contact person" />
+
+            <Text style={styles.modalLabel}>License No.</Text>
+            <TextInput style={styles.modalInput} value={editLicenseNum} onChangeText={setEditLicenseNum} placeholder="License number" />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.modalButton, styles.modalButtonCancel]} onPress={() => setShowEditModal(false)} disabled={isSubmitting}>
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButton, styles.modalButtonSubmit]} onPress={handleSaveEdit} disabled={isSubmitting}>
+                {isSubmitting ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.modalButtonSubmitText}>Save</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
 
+function InfoRow({ icon, label, value }: { icon: any; label: string; value: string }) {
+  return (
+    <View style={styles.infoRow}>
+      <View style={styles.infoIcon}>
+        <Ionicons name={icon} size={18} color="#6b7280" />
+      </View>
+      <View style={styles.infoContent}>
+        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={styles.infoValue}>{value}</Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f3f4f6',
-  },
-  centerState: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  stateText: {
-    fontSize: 15,
-    color: '#999',
-    marginTop: 12,
-  },
-  retryButton: {
-    marginTop: 16,
-    backgroundColor: '#000',
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: '#FFF',
-    fontWeight: '600',
-  },
-  header: {
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    paddingVertical: 32,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  backBtn: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
-    zIndex: 10,
-    padding: 4,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#eff6ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  avatarText: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#3b82f6',
-  },
-  name: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  statusBadge: {
-    backgroundColor: '#dcfce7',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  statusText: {
-    color: '#16a34a',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  content: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  cardTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 16,
-  },
-  financialGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 16,
-  },
-  financialItem: {
-    width: '46%',
-    backgroundColor: '#f9fafb',
-    borderRadius: 10,
-    padding: 12,
-    alignItems: 'center',
-  },
-  financialLabel: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  financialValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  progressBarBg: {
-    height: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  summaryChip: {
-    flex: 1,
-    borderRadius: 10,
-    padding: 10,
-    alignItems: 'center',
-  },
-  chipLabel: {
-    fontSize: 11,
-    color: '#666',
-    fontWeight: '500',
-  },
-  chipValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000',
-    marginTop: 2,
-  },
-  receivableItem: {
-    backgroundColor: '#f9fafb',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-    borderLeftWidth: 3,
-    borderLeftColor: '#dc2626',
-  },
-  receivableHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  receivableRef: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111',
-  },
-  overdueBadge: {
-    backgroundColor: '#fecaca',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  overdueText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#991b1b',
-  },
-  receivableRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  receivableLabel: {
-    fontSize: 13,
-    color: '#666',
-  },
-  receivableDate: {
-    fontSize: 12,
-    color: '#999',
-  },
-  invoiceItem: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    paddingVertical: 12,
-  },
-  invoiceHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  invoiceNumber: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111',
-  },
-  invoiceDate: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 2,
-  },
-  invoiceStatusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  invoiceStatusText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  invoiceNarration: {
-    fontSize: 13,
-    color: '#888',
-    marginBottom: 6,
-  },
-  invoiceAmounts: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  invoiceAmount: {
-    fontSize: 13,
-    color: '#333',
-    fontWeight: '500',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-    paddingVertical: 20,
-  },
+  container: { flex: 1, backgroundColor: '#f3f4f6' },
+  centerState: { justifyContent: 'center', alignItems: 'center' },
+  stateText: { fontSize: 15, color: '#999', marginTop: 12 },
+  retryButton: { marginTop: 16, backgroundColor: '#000', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8 },
+  retryButtonText: { color: '#FFF', fontWeight: '600' },
+  header: { backgroundColor: '#fff', alignItems: 'center', paddingVertical: 32, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  backBtn: { position: 'absolute', top: 50, left: 20, zIndex: 10, padding: 4 },
+  avatar: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#E8E4F3', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  avatarText: { fontSize: 32, fontWeight: '700', color: '#6B4EFF' },
+  name: { fontSize: 22, fontWeight: '700', color: '#111827', marginBottom: 8, textAlign: 'center' },
+  statusBadge: { backgroundColor: '#dcfce7', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, marginBottom: 16 },
+  statusText: { color: '#16a34a', fontSize: 13, fontWeight: '600' },
+  actionRow: { flexDirection: 'row', gap: 12 },
+  editButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#111', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  editButtonText: { color: '#FFF', fontWeight: '600', fontSize: 14 },
+  deleteButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#dc2626', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
+  deleteButtonText: { color: '#FFF', fontWeight: '600', fontSize: 14 },
+  content: { paddingHorizontal: 16, paddingTop: 16 },
+  card: { backgroundColor: '#fff', borderRadius: 12, padding: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
+  cardTitle: { fontSize: 17, fontWeight: '700', color: '#111827', marginBottom: 16 },
+  infoGrid: { gap: 16 },
+  infoRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  infoIcon: { width: 36, height: 36, borderRadius: 8, backgroundColor: '#f9fafb', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  infoContent: { flex: 1 },
+  infoLabel: { fontSize: 12, color: '#6b7280', marginBottom: 2 },
+  infoValue: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, maxHeight: '85%' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, color: '#000' },
+  modalLabel: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 6 },
+  modalInput: { borderWidth: 1, borderColor: '#E5E5E5', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 14, backgroundColor: '#F9FAFB' },
+  modalActions: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginTop: 8 },
+  modalButton: { flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  modalButtonCancel: { backgroundColor: '#F3F4F6' },
+  modalButtonCancelText: { color: '#374151', fontWeight: '600', fontSize: 16 },
+  modalButtonSubmit: { backgroundColor: '#000' },
+  modalButtonSubmitText: { color: '#FFF', fontWeight: '600', fontSize: 16 },
 });

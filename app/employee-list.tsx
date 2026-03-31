@@ -41,13 +41,13 @@ export default function EmployeeList() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        {/* <TouchableOpacity
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
           activeOpacity={0.8}
         >
           <Ionicons name="chevron-back" size={22} color="#000000" />
-        </TouchableOpacity> */}
+        </TouchableOpacity>
         <Text style={styles.title}>Employee List</Text>
         <Text style={styles.subtitle}>
           Review employee details and update work status.
@@ -73,8 +73,14 @@ export default function EmployeeList() {
               <Text style={[styles.cell, styles.headerCell]}>System Access</Text>
             </View>
 
+            {employees.length === 0 && !isLoading && (
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                <Text style={{ color: '#999', fontSize: 16 }}>No employees found in database</Text>
+              </View>
+            )}
+
             {employees.map((employee, index) => (
-              <View key={employee.id} style={[styles.row, styles.dataRow]}>
+              <View key={employee.id || employee._id || index} style={[styles.row, styles.dataRow]}>
                 <Text style={[styles.cell, { flex: 0.5 }]}>{index + 1}</Text>
                 <Text style={styles.cell}>{employee.name}</Text>
                 <Text style={styles.cell}>{employee.email}</Text>
@@ -128,7 +134,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F8F8',
-    paddingTop: 50,
+    paddingTop: 60,
   },
   header: {
     paddingHorizontal: 20,

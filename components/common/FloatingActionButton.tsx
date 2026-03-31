@@ -38,15 +38,15 @@ export default function FloatingActionButton() {
         </View>
       )}
 
-      <TouchableOpacity 
-        style={[styles.fab, isOpen && styles.fabOpen]} 
+      <TouchableOpacity
+        style={[styles.fab, isOpen && styles.fabOpen]}
         onPress={toggleOpen}
         activeOpacity={0.8}
       >
-        <Ionicons 
-          name={isOpen ? "close" : "add"} 
-          size={32} 
-          color="#FFFFFF" 
+        <Ionicons
+          name={isOpen ? "close" : "add"}
+          size={32}
+          color="#FFFFFF"
         />
       </TouchableOpacity>
     </View>
@@ -56,7 +56,7 @@ export default function FloatingActionButton() {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 110,
     right: 24,
     alignItems: 'flex-end',
     zIndex: 9999,

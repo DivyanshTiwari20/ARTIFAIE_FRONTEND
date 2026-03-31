@@ -1,13 +1,17 @@
 import NotificationCard from '@/components/notification/NotificationCard';
+import { NotificationListSkeleton } from '@/components/common/Skeleton';
 import { normalizeNotificationsList } from '@/lib/notifications';
-import { getNotifications, markAllNotificationsRead, markNotificationRead } from '@/services/api';
+import { getNotifications, getTask, markAllNotificationsRead, markNotificationRead } from '@/services/api';
 import { Notification, NotificationFilter } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { isAdminOrManager } from '@/lib/roles';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -17,16 +21,20 @@ import {
 
 export default function NotificationPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const showModeToggle = isAdminOrManager(user?.role);
   
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [selectedFilter, setSelectedFilter] = useState<NotificationFilter>('today');
+  const [selectedFilter, setSelectedFilter] = useState<NotificationFilter>('all');
   const [mode, setMode] = useState<'task' | 'general'>('task');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchNotifications = useCallback(async () => {
+    if (!user) return; // Don't fetch until logged in
     try {
+      setFetchError(null);
       const res = await getNotifications(showModeToggle ? mode : undefined);
       if (res && res.success) {
         const raw = res.data;
@@ -41,17 +49,21 @@ export default function NotificationPage() {
       }
     } catch (error: any) {
       console.error('Failed to load notifications:', error?.message || 'Unknown error');
+      setFetchError(error?.message || 'Failed to load notifications');
       setNotifications([]);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [mode, showModeToggle, user]);
 
-  useEffect(() => {
-    setIsLoading(true);
-    fetchNotifications();
-  }, [fetchNotifications, mode]);
+  // Re-fetch every time this screen is focused (e.g., after creating a task)
+  useFocusEffect(
+    useCallback(() => {
+      setIsLoading(true);
+      fetchNotifications();
+    }, [fetchNotifications])
+  );
 
   const onRefresh = useCallback(() => {
     setIsRefreshing(true);
@@ -87,11 +99,28 @@ export default function NotificationPage() {
     });
   };
 
-  const handleNotificationPress = async (id: string) => {
+  const handleNotificationPress = async (id: string, relatedTaskId?: string) => {
     setNotifications(notifications.map(n => 
       n.id === id ? { ...n, isRead: true } : n
     ));
-    await markNotificationRead(id);
+    try { await markNotificationRead(id); } catch {}
+
+    if (relatedTaskId) {
+      try {
+        const taskRes = await getTask(relatedTaskId);
+        if (taskRes.success && taskRes.data) {
+          if (isAdminOrManager(user?.role)) {
+            router.push(`/employee-detail?id=${taskRes.data.assignedTo}`);
+          } else {
+            router.push('/');
+          }
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to load related task', err);
+      }
+    }
+
     Alert.alert('Notification', 'Task details coming soon!');
   };
 
@@ -99,7 +128,7 @@ export default function NotificationPage() {
     setNotifications(notifications.map(n => 
       n.id === id ? { ...n, isRead: true } : n
     ));
-    await markNotificationRead(id);
+    try { await markNotificationRead(id); } catch {}
   };
 
   const handleMarkAllAsRead = async () => {
@@ -107,8 +136,10 @@ export default function NotificationPage() {
     setNotifications(notifications.map(n => 
       filtered.find(f => f.id === n.id) ? { ...n, isRead: true } : n
     ));
-    await markAllNotificationsRead();
-    Alert.alert('Success', 'All notifications marked as read');
+    try {
+      await markAllNotificationsRead();
+      Alert.alert('Success', 'All notifications marked as read');
+    } catch {}
   };
 
   const filteredNotifications = filterNotifications();
@@ -196,10 +227,20 @@ export default function NotificationPage() {
       <ScrollView 
         style={styles.notificationsList}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
+        }
       >
         {isLoading && !isRefreshing ? (
+          <NotificationListSkeleton count={6} />
+        ) : fetchError ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>Loading notifications...</Text>
+            <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
+            <Text style={styles.emptyText}>Failed to load</Text>
+            <Text style={styles.emptySubText}>{fetchError}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={onRefresh}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
           </View>
         ) : filteredNotifications.length > 0 ? (
           filteredNotifications.map((notification) => (
@@ -223,6 +264,7 @@ export default function NotificationPage() {
             </Text>
           </View>
         )}
+        <View style={{ height: 20 }} />
       </ScrollView>
     </View>
   );
@@ -249,7 +291,7 @@ const styles = StyleSheet.create({
   },
   unreadCount: {
     fontSize: 14,
-    color: '#000000 ',
+    color: '#000000',
     marginTop: 4,
     fontWeight: '600',
   },
@@ -313,6 +355,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#CCCCCC',
     marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: '#000',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
   },
   modeToggleContainer: {
     flexDirection: 'row',
@@ -345,4 +400,4 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontWeight: '600',
   },
-});
+});

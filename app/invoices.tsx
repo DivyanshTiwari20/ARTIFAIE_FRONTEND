@@ -1,4 +1,5 @@
 import { getInvoiceRegister } from '@/services/api';
+import { InvoiceListSkeleton } from '@/components/common/Skeleton';
 import { InvoiceItem } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -199,10 +200,7 @@ export default function InvoicesScreen() {
         }
       >
         {isLoading ? (
-          <View style={styles.centerState}>
-            <ActivityIndicator size="large" color="#000" />
-            <Text style={styles.stateText}>Loading invoices...</Text>
-          </View>
+          <InvoiceListSkeleton count={5} />
         ) : error ? (
           <View style={styles.centerState}>
             <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />

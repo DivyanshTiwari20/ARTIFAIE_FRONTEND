@@ -32,10 +32,21 @@ export async function saveUser(user: any): Promise<void> {
   await AsyncStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
-export async function getSavedUser(): Promise<any | null> {
-  const raw = await AsyncStorage.getItem(USER_KEY);
-  return raw ? JSON.parse(raw) : null;
-}
+export const getSavedUser = async (): Promise<any | null> => {
+  try {
+    const userStr = await AsyncStorage.getItem(USER_KEY);
+    return userStr ? JSON.parse(userStr) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const updatePushToken = async (pushToken: string) => {
+  return await apiFetch('/api/auth/push-token', {
+    method: 'PUT',
+    body: JSON.stringify({ pushToken }),
+  });
+};
 
 export async function clearAuth(): Promise<void> {
   await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
@@ -53,10 +64,10 @@ interface ApiResponse<T = any> {
   [key: string]: any;
 }
 
-async function apiFetch<T = any>(
+export const apiFetch = async <T = any>(
   endpoint: string,
   options: RequestInit = {}
-): Promise<ApiResponse<T>> {
+): Promise<ApiResponse<T>> => {
   const token = await getToken();
 
   const headers: Record<string, string> = {
@@ -273,6 +284,10 @@ export const getTasks = async (params: { status?: string, assignedTo?: string } 
   return await apiFetch(`/api/tasks${qs ? `?${qs}` : ''}`);
 };
 
+export const getTask = async (id: string) => {
+  return await apiFetch(`/api/tasks/${id}`);
+};
+
 export const createTask = async (taskData: {
   title: string;
   description?: string;
@@ -304,10 +319,44 @@ export const createClient = async (clientData: {
   });
 };
 
+export const getClients = async () => {
+  return await apiFetch('/api/clients');
+};
+
+export const getClient = async (id: string) => {
+  return await apiFetch(`/api/clients/${id}`);
+};
+
+export const updateClient = async (id: string, data: Record<string, any>) => {
+  return await apiFetch(`/api/clients/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+};
+
+export const deleteClient = async (id: string) => {
+  return await apiFetch(`/api/clients/${id}`, {
+    method: 'DELETE',
+  });
+};
+
 export const updateTaskStatus = async (id: string, status: string) => {
   return await apiFetch(`/api/tasks/${id}/status`, {
     method: 'PUT',
     body: JSON.stringify({ status }),
+  });
+};
+
+export const updateTask = async (id: string, data: Record<string, any>) => {
+  return await apiFetch(`/api/tasks/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+};
+
+export const deleteTask = async (id: string) => {
+  return await apiFetch(`/api/tasks/${id}`, {
+    method: 'DELETE',
   });
 };
 

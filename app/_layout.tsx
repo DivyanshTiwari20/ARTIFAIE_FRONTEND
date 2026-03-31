@@ -3,6 +3,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { View } from 'react-native';
 import 'react-native-reanimated';
 
 export const unstable_settings = {
@@ -15,19 +16,22 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-          <Stack.Screen name="invoices" options={{ headerShown: false }} />
-          <Stack.Screen name="client-detail" options={{ headerShown: false }} />
-          <Stack.Screen name="employee-detail" options={{ headerShown: false }} />
-          <Stack.Screen name="assign-task" options={{ title: 'Assign Task' }} />
-          <Stack.Screen name="create-task" options={{ title: 'Create Task' }} />
-          <Stack.Screen name="create-client" options={{ title: 'Create Client' }} />
-          <Stack.Screen name="employee-list" options={{ title: 'Employees' }} />
-        </Stack>
+        <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+          <Stack>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="invoices" options={{ headerShown: false }} />
+            <Stack.Screen name="client-detail" options={{ headerShown: false }} />
+            <Stack.Screen name="employee-detail" options={{ headerShown: false }} />
+            <Stack.Screen name="assign-task" options={{ headerShown: false }} />
+            <Stack.Screen name="create-task" options={{ headerShown: false }} />
+            <Stack.Screen name="create-client" options={{ headerShown: false }} />
+            <Stack.Screen name="employee-list" options={{ headerShown: false }} />
+            <Stack.Screen name="update-password" options={{ headerShown: false }} />
+            <Stack.Screen name="settings" options={{ headerShown: false }} />
+          </Stack>
+        </View>
       </AuthProvider>
-      <StatusBar style="dark" />
+      <StatusBar style="dark" backgroundColor="#FFFFFF" />
     </ThemeProvider>
   );
 }

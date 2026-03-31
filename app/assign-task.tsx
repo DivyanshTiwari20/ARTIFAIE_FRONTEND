@@ -1,6 +1,5 @@
-import { dummyClients } from '@/data/dummpyData';
-import { createTask } from '@/services/api';
-import { Priority } from '@/types';
+import { createTask, getClients } from '@/services/api';
+import { Priority, Client } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -32,9 +31,29 @@ const [selectedDate, setSelectedDate] = useState(new Date());
   const [priority, setPriority] = useState<Priority>('medium');
   const [category, setCategory] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  const [dbClients, setDbClients] = useState<any[]>([]);
+  const [isLoadingClients, setIsLoadingClients] = useState(false);
   const [deadlineDate, setDeadlineDate] = useState(new Date());
+
   const priorities: Priority[] = ['low', 'medium', 'high', 'urgent'];
   const categories = ['Incorporation', 'HR', 'CFO', 'Legal', 'Compliance'];
+
+  React.useEffect(() => {
+    const fetchClients = async () => {
+      try {
+        setIsLoadingClients(true);
+        const res = await getClients();
+        if (res.success) {
+          setDbClients(res.data);
+        }
+      } catch (err) {
+        console.error('Failed to load clients:', err);
+      } finally {
+        setIsLoadingClients(false);
+      }
+    };
+    fetchClients();
+  }, []);
 
   const getPriorityColor = (p: Priority) => {
     switch (p) {
@@ -58,7 +77,8 @@ const [selectedDate, setSelectedDate] = useState(new Date());
     try {
       setIsSubmitting(true);
       
-      const clientName = dummyClients.find((c) => c.id === selectedClient)?.name;
+      const client = dbClients.find((c) => (c.id || c._id) === selectedClient);
+      const clientName = client?.name || '';
       
       const res = await createTask({
         title,
@@ -103,13 +123,13 @@ const [selectedDate, setSelectedDate] = useState(new Date());
   return (
     <View style={styles.container}>
       {/* Header */}
-      {/* <View style={styles.header}>
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#000000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Assign Task</Text>
         <View style={styles.placeholder} />
-      </View> */}
+      </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Assignee Info */}
@@ -195,32 +215,38 @@ const [selectedDate, setSelectedDate] = useState(new Date());
   >
     <Text style={selectedClient ? styles.dateText : styles.placeholderText}>
       {selectedClient 
-        ? dummyClients.find(c => c.id === selectedClient)?.name 
-        : 'Select client'}
+        ? dbClients.find(c => (c.id || c._id) === selectedClient)?.name 
+        : isLoadingClients ? 'Loading clients...' : 'Select client'}
     </Text>
     <Ionicons name="chevron-down" size={20} color="#666666" />
   </TouchableOpacity>
   {showClientDropdown && (
     <View style={styles.dropdown}>
       <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
-        {dummyClients.map((client) => (
-          <TouchableOpacity
-            key={client.id}
-            style={styles.dropdownItem}
-            onPress={() => {
-              setSelectedClient(client.id);
-              setShowClientDropdown(false);
-            }}
-          >
-            <View>
-              <Text style={styles.dropdownItemText}>{client.name}</Text>
-              <Text style={styles.dropdownItemSubtext}>{client.company}</Text>
-            </View>
-            {selectedClient === client.id && (
-              <Ionicons name="checkmark" size={20} color="#000000" />
-            )}
-          </TouchableOpacity>
-        ))}
+        {dbClients.length === 0 && !isLoadingClients && (
+          <Text style={{ padding: 16, color: '#999' }}>No clients found</Text>
+        )}
+        {dbClients.map((client) => {
+          const id = client.id || client._id;
+          return (
+            <TouchableOpacity
+              key={id}
+              style={styles.dropdownItem}
+              onPress={() => {
+                setSelectedClient(id);
+                setShowClientDropdown(false);
+              }}
+            >
+              <View>
+                <Text style={styles.dropdownItemText}>{client.name}</Text>
+                <Text style={styles.dropdownItemSubtext}>{client.location || client.email || '-'}</Text>
+              </View>
+              {selectedClient === id && (
+                <Ionicons name="checkmark" size={20} color="#000000" />
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
     </View>
   )}

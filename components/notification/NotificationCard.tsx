@@ -5,7 +5,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface NotificationCardProps {
   notification: Notification;
-  onPress: (id: string) => void;
+  onPress: (id: string, relatedTaskId?: string) => void;
   onMarkAsRead?: (id: string) => void;
 }
 
@@ -64,7 +64,7 @@ export default function NotificationCard({
   return (
     <TouchableOpacity
       style={[styles.card, !notification.isRead && styles.unreadCard]}
-      onPress={() => onPress(notification.id)}
+      onPress={() => onPress(notification.id, notification.relatedTaskId)}
       activeOpacity={0.7}
     >
       <View style={[styles.iconContainer, { backgroundColor: getIconColor() + '20' }]}>

@@ -1,10 +1,12 @@
-import { Picker } from '@react-native-picker/picker';
-import { Building, Calendar, Check, ChevronDown, ChevronUp, Clock, CreditCard, FileCheck, FileText, Plus, User } from 'lucide-react-native';
-import React, { useState, useEffect } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
-import { getTasks, createTask, updateTaskStatus } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import { TaskListSkeleton } from '@/components/common/Skeleton';
+import { createTask, getTasks, updateTaskStatus, updateTask, deleteTask } from '@/services/api';
+import { Picker } from '@react-native-picker/picker';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Calendar, ChevronDown, ChevronUp, Clock, FileCheck, FileText, Pencil, Plus, Trash2, User } from 'lucide-react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 interface Task {
   id: number;
@@ -43,14 +45,16 @@ interface EmployeeData {
 
 const EmployeeProfileScreen: React.FC = () => {
   const params = useLocalSearchParams();
+  const router = useRouter();
   const employeeId = params.id as string;
   const { user } = useAuth();
-  
+
   const [expandedStage, setExpandedStage] = useState<string>('');
   const [tasks, setTasks] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   const [showTaskModal, setShowTaskModal] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDesc, setNewTaskDesc] = useState('');
   const [newTaskStatus, setNewTaskStatus] = useState('pending');
@@ -81,18 +85,14 @@ const EmployeeProfileScreen: React.FC = () => {
   const employeeData: EmployeeData = {
     id: employeeId || 'EMP001',
     name: params.name ? String(params.name) : 'Employee Profile',
-    role: 'Employee Role',
-    department: 'Department',
+    role: params.role ? String(params.role) : 'Team Member',
+    department: 'Standard Department',
     status: 'Active',
     performanceStatus: 'Excellent',
     taskStatus: 'On Track',
-    joinedDate: 'Joined Date',
-    nextReviewDate: 'Review Date',
-    specializations: [
-      'Task Execution',
-      'Reporting',
-      'General'
-    ]
+    joinedDate: 'Jan 2024',
+    nextReviewDate: 'Jun 2024',
+    specializations: ['Account Management', 'Reporting']
   };
 
   const getStatusConfig = (status: string): StatusConfig => {
@@ -127,45 +127,121 @@ const EmployeeProfileScreen: React.FC = () => {
     setExpandedStage(expandedStage === id ? '' : id);
   };
 
-  const handleCreateTask = async () => {
+  const openCreateModal = () => {
+    setEditingTaskId(null);
+    setNewTaskTitle('');
+    setNewTaskDesc('');
+    setNewTaskStatus('pending');
+    setShowTaskModal(true);
+  };
+
+  const openEditModal = (task: any) => {
+    const id = task.id || task._id;
+    setEditingTaskId(id);
+    setNewTaskTitle(task.title || '');
+    setNewTaskDesc(task.description || '');
+    setNewTaskStatus(task.status || 'pending');
+    setShowTaskModal(true);
+  };
+
+  const handleSaveTask = async () => {
     if (!newTaskTitle) {
       Alert.alert('Error', 'Title is required');
       return;
     }
     try {
       setIsSubmitting(true);
-      const res = await createTask({
-        title: newTaskTitle,
-        description: newTaskDesc,
-        status: newTaskStatus,
-        assignedTo: employeeId,
-      });
-      if (res.success) {
-        setShowTaskModal(false);
-        setNewTaskTitle('');
-        setNewTaskDesc('');
-        setNewTaskStatus('pending');
-        fetchTasks(); // Refresh tasks
+      if (editingTaskId) {
+        // Edit existing task
+        const res = await updateTask(editingTaskId, {
+          title: newTaskTitle,
+          description: newTaskDesc,
+          status: newTaskStatus,
+        });
+        if (res.success) {
+          setShowTaskModal(false);
+          fetchTasks();
+        } else {
+          Alert.alert('Error', res.message || 'Failed to update task');
+        }
       } else {
-        Alert.alert('Error', res.message || 'Failed to create task');
+        // Create new task
+        const res = await createTask({
+          title: newTaskTitle,
+          description: newTaskDesc,
+          status: newTaskStatus,
+          assignedTo: employeeId,
+        });
+        if (res.success) {
+          setShowTaskModal(false);
+          setNewTaskTitle('');
+          setNewTaskDesc('');
+          setNewTaskStatus('pending');
+          fetchTasks();
+        } else {
+          Alert.alert('Error', res.message || 'Failed to create task');
+        }
       }
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Error creating task');
+      Alert.alert('Error', e.message || 'Error saving task');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleDeleteTask = (task: any) => {
+    const id = task.id || task._id;
+    Alert.alert(
+      'Delete Task',
+      `Are you sure you want to delete "${task.title}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await deleteTask(id);
+              if (res.success) {
+                fetchTasks();
+              } else {
+                Alert.alert('Error', res.message || 'Failed to delete');
+              }
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Failed to delete task');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
-    <ScrollView style={styles.container}>
-      {/* Header */}
+    <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+      {/* Screen Header */}
       <View style={styles.header}>
-        <View style={styles.avatar}>
-          <User size={40} color="#3b82f6" />
+        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 16 }}>
+          <Ionicons name="arrow-back" size={24} color="#000000" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Employee Profile</Text>
+      </View>
+
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      {/* Profile Header */}
+      <View style={styles.profileCard}>
+        <View style={styles.headerRow}>
+          <View style={styles.avatar}>
+            <User size={40} color="#3b82f6" />
+          </View>
+          <View style={styles.headerInfo}>
+            <Text style={styles.name}>{employeeData.name}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              <Text style={styles.company}>{employeeData.role}</Text>
+              <View style={styles.companyDot} />
+              <Text style={styles.department}>{employeeData.department}</Text>
+            </View>
+          </View>
         </View>
-        <Text style={styles.name}>{employeeData.name}</Text>
-        <Text style={styles.company}>{employeeData.role}</Text>
-        <Text style={styles.department}>{employeeData.department}</Text>
         <View style={styles.statusBadge}>
           <Text style={styles.statusText}>{employeeData.status}</Text>
         </View>
@@ -219,23 +295,7 @@ const EmployeeProfileScreen: React.FC = () => {
                 <Text style={styles.detailLabel}>Next Review Date</Text>
                 <Text style={styles.detailValue}>{employeeData.nextReviewDate}</Text>
               </View>
-              <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>Managing Client</Text>
-                {/* <Text style={styles.detailValue}>{employeeData.managingClient}</Text> */}
-              </View>
             </View>
-          </View>
-        </View>
-
-        {/* Specializations Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Specializations</Text>
-          <View style={styles.servicesContainer}>
-            {employeeData.specializations.map((specialization, index) => (
-              <View key={index} style={styles.serviceChip}>
-                <Text style={styles.serviceText}>{specialization}</Text>
-              </View>
-            ))}
           </View>
         </View>
 
@@ -247,7 +307,7 @@ const EmployeeProfileScreen: React.FC = () => {
 
           <View style={styles.workflowContainer}>
             {isLoading ? (
-              <ActivityIndicator size="large" color="#000000" />
+              <TaskListSkeleton count={4} />
             ) : tasks.length === 0 ? (
               <Text style={{ textAlign: 'center', color: '#666666', marginBottom: 20 }}>No tasks found for this employee.</Text>
             ) : (
@@ -310,6 +370,16 @@ const EmployeeProfileScreen: React.FC = () => {
                               Client: {task.clientName}
                             </Text>
                           )}
+                          <View style={styles.taskActionRow}>
+                            <TouchableOpacity style={styles.taskEditBtn} onPress={() => openEditModal(task)}>
+                              <Pencil size={14} color="#FFF" />
+                              <Text style={styles.taskEditBtnText}>Edit</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.taskDeleteBtn} onPress={() => handleDeleteTask(task)}>
+                              <Trash2 size={14} color="#FFF" />
+                              <Text style={styles.taskDeleteBtnText}>Delete</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
                       )}
                     </View>
@@ -319,10 +389,10 @@ const EmployeeProfileScreen: React.FC = () => {
             )}
           </View>
 
-          {/* Add Task Button (Visible to everyone handling the employee details) */}
+          {/* Add Task Button */}
           <TouchableOpacity
             style={styles.assignButton}
-            onPress={() => setShowTaskModal(true)}
+            onPress={openCreateModal}
             activeOpacity={0.8}
           >
             <Plus size={22} color="#FFFFFF" />
@@ -340,8 +410,8 @@ const EmployeeProfileScreen: React.FC = () => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Update Task Status</Text>
-            
+            <Text style={styles.modalTitle}>{editingTaskId ? 'Edit Task' : 'Add New Task'}</Text>
+
             <Text style={styles.modalLabel}>Title</Text>
             <TextInput
               style={styles.modalInput}
@@ -383,44 +453,79 @@ const EmployeeProfileScreen: React.FC = () => {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonSubmit]}
-                onPress={handleCreateTask}
+                onPress={handleSaveTask}
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.modalButtonSubmitText}>Save Task</Text>
+                  <Text style={styles.modalButtonSubmitText}>{editingTaskId ? 'Update' : 'Save Task'}</Text>
                 )}
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#F9FAFB',
   },
   header: {
-    backgroundColor: '#ffffff',
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 32,
     paddingHorizontal: 20,
+    paddingTop: 60,
+    paddingBottom: 16,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: '#F0F0F0',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  profileCard: {
+    backgroundColor: '#FFFFFF',
+    padding: 24,
+    margin: 16,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  companyDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#cbd5e1',
   },
   avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#eff6ff',
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: '#EFF6FF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginRight: 16,
   },
   name: {
     fontSize: 22,
@@ -730,6 +835,39 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 16,
+  },
+  taskActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  taskEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#111',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 6,
+  },
+  taskEditBtnText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  taskDeleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#dc2626',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 6,
+  },
+  taskDeleteBtnText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 13,
   },
 });
 

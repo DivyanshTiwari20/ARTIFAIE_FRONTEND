@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { DashboardSkeleton } from '@/components/common/Skeleton';
 import NotificationBadge from '../../components/common/NotificationBadge';
 import QuickNotificationModal from '../../components/notification/QuickNotificationModal';
 import { useAuth } from '../../context/AuthContext';
@@ -53,7 +54,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [notifications, setNotifications] = useState(dummyNotifications);
   const [showQuickNotifications, setShowQuickNotifications] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<DashboardStats>({
@@ -175,10 +176,9 @@ export default function Home() {
           </View>
           <TouchableOpacity
             style={styles.notificationIconTop}
-            onPress={() => setShowQuickNotifications(true)}
+            onPress={() => router.push('/settings' as any)}
           >
-            <Ionicons name="notifications-outline" size={28} color="#000000" />
-            <NotificationBadge count={getUnreadCount()} />
+            <Ionicons name="settings-outline" size={28} color="#000000" />
           </TouchableOpacity>
         </View>
 
@@ -201,10 +201,7 @@ export default function Home() {
         }
       >
         {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#000000" />
-            <Text style={styles.loadingText}>Loading dashboard...</Text>
-          </View>
+          <DashboardSkeleton />
         ) : error ? (
           <View style={styles.errorContainer}>
             <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
@@ -217,7 +214,9 @@ export default function Home() {
         ) : (
           <>
             {/* Financial Overview Row */}
-            <View style={styles.overviewCard}>
+            {user?.role === 'admin' && (
+              <>
+                <View style={styles.overviewCard}>
               <View style={styles.overviewHeader}>
                 <Text style={styles.overviewTitle}>Financial Overview</Text>
                 <View style={[
@@ -297,27 +296,34 @@ export default function Home() {
                 <Text style={styles.statSubtextStyle}>Net profit margin</Text>
               </View>
             </View>
+            </>
+            )}
 
             {/* Directories Section */}
-            <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Directories</Text>
-
+            {user?.role !== 'employee' && (
+              <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Directories</Text>
+            )}
             <View style={styles.directoryGrid}>
               {/* Employee Card */}
-              <TouchableOpacity
-                style={styles.directoryCard}
-                onPress={() => router.push('/list?tab=employees')}
-              >
-                <View style={[styles.directoryIconContainer, { backgroundColor: '#E8E4F3' }]}>
-                  <Ionicons name="people" size={24} color="#6B4EFF" />
-                </View>
-                <View style={styles.directoryInfo}>
-                  <Text style={styles.directoryTitle}>Employees</Text>
-                  <Text style={styles.directoryStats}>View team members</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
-              </TouchableOpacity>
+              {user?.role !== 'employee' && (
+                <TouchableOpacity
+                  style={styles.directoryCard}
+                  onPress={() => router.push('/list?tab=employees')}
+                >
+                  <View style={[styles.directoryIconContainer, { backgroundColor: '#E8E4F3' }]}>
+                    <Ionicons name="people" size={24} color="#6B4EFF" />
+                  </View>
+                  <View style={styles.directoryInfo}>
+                    <Text style={styles.directoryTitle}>Employees</Text>
+                    <Text style={styles.directoryStats}>View team members</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
+                </TouchableOpacity>
+              )}
 
               {/* Client Card */}
+              {user?.role === 'admin' && (
+                <>
               <TouchableOpacity
                 style={styles.directoryCard}
                 onPress={() => router.push('/list?tab=clients')}
@@ -350,18 +356,14 @@ export default function Home() {
                 </View>
                 <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
               </TouchableOpacity>
+              </>
+              )}
             </View>
           </>
         )}
       </ScrollView>
 
-      {/* Quick Notification Modal */}
-      <QuickNotificationModal
-        visible={showQuickNotifications}
-        onClose={() => setShowQuickNotifications(false)}
-        notifications={getLast24HoursNotifications()}
-        onNotificationPress={handleNotificationPress}
-      />
+      {/* Quick Notification Modal removed as notification bell is updated to settings */}
     </View>
   );
 }

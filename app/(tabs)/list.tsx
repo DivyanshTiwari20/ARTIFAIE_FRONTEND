@@ -1,10 +1,10 @@
 import EmployeeCard from '@/components/list/EmployeeCard';
+import { ListSkeleton } from '@/components/common/Skeleton';
 import { useAuth } from '@/context/AuthContext';
 import { isAdminOrManager } from '@/lib/roles';
-import { getClientBilling, getEmployees } from '@/services/api';
-import { ClientRealisation } from '@/types';
+import { getClients, getEmployees } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -41,7 +41,7 @@ export default function List() {
   const [employeesError, setEmployeesError] = useState<string | null>(null);
 
   // Client data from Tally
-  const [clients, setClients] = useState<ClientRealisation[]>([]);
+  const [clients, setClients] = useState<any[]>([]);
   const [isLoadingClients, setIsLoadingClients] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -56,9 +56,9 @@ export default function List() {
     try {
       setClientsError(null);
       setIsLoadingClients(true);
-      const res = await getClientBilling();
+      const res = await getClients();
       if (res.success) {
-        setClients(res.data?.clientRealisationRates || []);
+        setClients(res.data || []);
       }
     } catch (err: any) {
       setClientsError(err.message || 'Failed to load clients');
@@ -84,15 +84,17 @@ export default function List() {
     }
   }, []);
 
-  useEffect(() => {
-    if (activeTab === 'clients' && clients.length === 0) {
-      fetchClients();
-    } else if (activeTab === 'employees' && employees.length === 0) {
-      if (isAdminOrManager(user?.role)) {
-        fetchEmployees();
+  useFocusEffect(
+    useCallback(() => {
+      if (activeTab === 'clients') {
+        fetchClients();
+      } else if (activeTab === 'employees') {
+        if (isAdminOrManager(user?.role)) {
+          fetchEmployees();
+        }
       }
-    }
-  }, [activeTab, fetchClients, fetchEmployees, user]);
+    }, [activeTab])
+  );
 
   const onRefresh = useCallback(() => {
     setIsRefreshing(true);
@@ -119,7 +121,7 @@ export default function List() {
     if (!search.trim()) return clients;
     const q = search.toLowerCase();
     return clients.filter((client) => {
-      const name = client?.clientName || '';
+      const name = client?.name || '';
       return name.toLowerCase().includes(q);
     });
   }, [search, clients]);
@@ -152,8 +154,8 @@ export default function List() {
     router.push(`/assign-task?employeeId=${employeeId}&employeeName=${employeeName}`);
   };
 
-  const handleClientPress = (clientName: string) => {
-    router.push(`/client-detail?clientName=${encodeURIComponent(clientName)}`);
+  const handleClientPress = (clientId: string, clientName: string) => {
+    router.push(`/client-detail?id=${clientId}&clientName=${encodeURIComponent(clientName)}`);
   };
 
   return (
@@ -207,10 +209,7 @@ export default function List() {
         {activeTab === 'employees' ? (
           <>
             {isLoadingEmployees ? (
-              <View style={styles.centerState}>
-                <ActivityIndicator size="large" color="#000" />
-                <Text style={styles.stateText}>Loading employees...</Text>
-              </View>
+              <ListSkeleton count={5} />
             ) : employeesError ? (
               <View style={styles.centerState}>
                 <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
@@ -237,10 +236,7 @@ export default function List() {
         ) : (
           <>
             {isLoadingClients ? (
-              <View style={styles.centerState}>
-                <ActivityIndicator size="large" color="#000" />
-                <Text style={styles.stateText}>Loading clients...</Text>
-              </View>
+              <ListSkeleton count={5} />
             ) : clientsError ? (
               <View style={styles.centerState}>
                 <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
@@ -254,23 +250,23 @@ export default function List() {
                 <Text style={styles.countText}>{filteredClients.length} Clients</Text>
                 {filteredClients.map((client, index) => (
                   <TouchableOpacity
-                    key={`${client.clientName}-${index}`}
+                    key={`${client.id || client.name}-${index}`}
                     style={styles.realClientCard}
-                    onPress={() => handleClientPress(client.clientName)}
+                    onPress={() => handleClientPress(client.id, client.name)}
                     activeOpacity={0.7}
                   >
                     <View style={styles.clientCardHeader}>
                       <View style={styles.clientAvatar}>
                         <Text style={styles.clientAvatarText}>
-                          {client.clientName?.charAt(0)?.toUpperCase() || '?'}
+                          {client.name?.charAt(0)?.toUpperCase() || '?'}
                         </Text>
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.clientCardName} numberOfLines={1}>
-                          {client.clientName}
+                          {client.name}
                         </Text>
                         <Text style={styles.clientRealisation}>
-                          Realisation: {client.feeRealisationRatePercent.toFixed(1)}%
+                          {client.email || 'No email'} | {client.phone || 'No phone'}
                         </Text>
                       </View>
                       <Ionicons name="chevron-forward" size={18} color="#ccc" />
@@ -278,36 +274,15 @@ export default function List() {
 
                     <View style={styles.clientCardStats}>
                       <View style={styles.clientStatItem}>
-                        <Text style={styles.clientStatLabel}>Billed</Text>
-                        <Text style={styles.clientStatValue}>{formatINR(client.totalBilled)}</Text>
+                        <Text style={styles.clientStatLabel}>Location</Text>
+                        <Text style={styles.clientStatValue} numberOfLines={1}>{client.location || 'N/A'}</Text>
                       </View>
                       <View style={styles.clientStatItem}>
-                        <Text style={styles.clientStatLabel}>Collected</Text>
-                        <Text style={[styles.clientStatValue, { color: '#16a34a' }]}>
-                          {formatINR(client.totalCollected)}
+                        <Text style={styles.clientStatLabel}>Contact Person</Text>
+                        <Text style={styles.clientStatValue} numberOfLines={1}>
+                          {client.contactPerson || 'N/A'}
                         </Text>
                       </View>
-                      <View style={styles.clientStatItem}>
-                        <Text style={styles.clientStatLabel}>Pending</Text>
-                        <Text style={[styles.clientStatValue, { color: '#dc2626' }]}>
-                          {formatINR(client.totalBilled - client.totalCollected)}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* Realisation Progress Bar */}
-                    <View style={styles.progressBarBg}>
-                      <View
-                        style={[
-                          styles.progressBarFill,
-                          {
-                            width: `${Math.min(client.feeRealisationRatePercent, 100)}%`,
-                            backgroundColor: client.feeRealisationRatePercent >= 80 ? '#16a34a'
-                              : client.feeRealisationRatePercent >= 50 ? '#d97706'
-                              : '#dc2626',
-                          },
-                        ]}
-                      />
                     </View>
                   </TouchableOpacity>
                 ))}
