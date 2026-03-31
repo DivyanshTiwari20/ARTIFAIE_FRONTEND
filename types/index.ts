@@ -1,9 +1,8 @@
-export type UserRole = 'Admin' | 'Manager' | 'Employee';
+export type UserRole = 'Admin' | 'Manager' | 'Employee' | 'admin' | 'manager' | 'employee';
 
 export interface User {
   id: string;
   email: string;
-  password: string;
   role: UserRole;
   name: string;
   avatar?: string;
@@ -48,6 +47,8 @@ export interface Notification {
     status: 'active' | 'inactive';
     tasksCompleted: number;
     tasksAssigned: number;
+    /** Optional UI flag from API (falls back to status if omitted). */
+    isActive?: boolean;
   }
   
   export interface Client {
@@ -63,3 +64,108 @@ export interface Notification {
   }
   
   export type Priority = 'low' | 'medium' | 'high' | 'urgent';
+
+  // ------------------------------------------
+  // Tally API Response Types
+  // ------------------------------------------
+
+  export interface TallyBill {
+    clientName: string;
+    billRef: string;
+    billDate: string;
+    dueDate: string;
+    billAmount: string;
+    pendingAmount: string;
+    daysOverdue: number;
+    isOverdue: boolean;
+    ageingBucket: string;
+    dueDateFormatted: string;
+  }
+
+  export interface ReceivablesSummary {
+    totalOutstanding: number;
+    totalOverdue: number;
+    totalBills: number;
+    overdueBills: number;
+    ageingBuckets: {
+      '0-30': { count: number; total: number };
+      '31-60': { count: number; total: number };
+      '61-90': { count: number; total: number };
+      '90+': { count: number; total: number };
+    };
+    mtdCollections: number;
+  }
+
+  export interface ProfitLossDerived {
+    totalRevenue: number;
+    totalExpenses: number;
+    netProfit: number;
+    netProfitMarginPercent: number;
+    revenueVsLastMonth: {
+      currentMonthRevenue: number;
+      lastMonthRevenue: number;
+      changeAmount: number;
+      changePercent: number;
+      lastMonthNetProfit: number;
+    };
+    revenueVsSameMonthLastYear: {
+      currentMonthRevenue: number;
+      sameMonthLastYearRevenue: number;
+      changeAmount: number;
+      changePercent: number;
+      sameMonthLastYearNetProfit: number;
+    };
+  }
+
+  export interface BankPositionData {
+    bankAccounts: Array<{ name: string; openingBalance: string; closingBalance: string }>;
+    cashAccounts: Array<{ name: string; closingBalance: string }>;
+    totalBankBalance: number;
+    totalCashBalance: number;
+    unclearedCheques: any[];
+    unclearedCount: number;
+    receiptsInPeriod: number;
+    paymentsInPeriod: number;
+    derived: {
+      totalLiquidFunds: number;
+    };
+  }
+
+  export interface InvoiceItem {
+    voucherNumber: string;
+    date: string;
+    clientName: string;
+    narration: string;
+    grossAmount: number;
+    taxableValue: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    billRef: string;
+    dueDate: string;
+    amountReceived: number;
+    outstandingBalance: number;
+    clientGSTIN: string;
+    placeOfSupply: string;
+    paymentStatus: 'Paid' | 'Partial' | 'Unpaid' | 'Overdue';
+    isOverdue: boolean;
+    dueDateFormatted: string;
+  }
+
+  export interface ClientBillingInvoice {
+    voucherNumber: string;
+    date: string;
+    clientName: string;
+    narration: string;
+    grossAmount: string;
+    outstandingAmount: string;
+    paymentStatus: 'Paid' | 'Partial' | 'Unpaid';
+    amountCollected: number;
+  }
+
+  export interface ClientRealisation {
+    clientName: string;
+    totalBilled: number;
+    totalCollected: number;
+    feeRealisationRatePercent: number;
+  }

@@ -18,9 +18,14 @@ export default function RootLayout() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+          <Stack.Screen name="invoices" options={{ headerShown: false }} />
+          <Stack.Screen name="client-detail" options={{ headerShown: false }} />
+          <Stack.Screen name="employee-detail" options={{ headerShown: false }} />
+          <Stack.Screen name="assign-task" options={{ title: 'Assign Task' }} />
+          <Stack.Screen name="employee-list" options={{ title: 'Employees' }} />
         </Stack>
       </AuthProvider>
-      <StatusBar style="auto" />
+      <StatusBar style="dark" />
     </ThemeProvider>
   );
 }

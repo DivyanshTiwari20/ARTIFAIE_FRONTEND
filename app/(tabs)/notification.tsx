@@ -1,8 +1,9 @@
 import NotificationCard from '@/components/notification/NotificationCard';
-import { dummyNotifications } from '@/data/dummpyData';
-import { NotificationFilter } from '@/types';
+import { normalizeNotificationsList } from '@/lib/notifications';
+import { getNotifications, markAllNotificationsRead, markNotificationRead } from '@/services/api';
+import { Notification, NotificationFilter } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     Alert,
     ScrollView,
@@ -13,15 +14,52 @@ import {
 } from 'react-native';
 
 export default function NotificationPage() {
-  const [notifications, setNotifications] = useState(dummyNotifications);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<NotificationFilter>('today');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await getNotifications();
+      if (res && res.success) {
+        const raw = res.data;
+        const list = Array.isArray(raw)
+          ? raw
+          : raw && typeof raw === 'object'
+            ? (raw as any).notifications ?? (raw as any).items ?? []
+            : [];
+        setNotifications(normalizeNotificationsList(list));
+      } else {
+        setNotifications([]);
+      }
+    } catch (error: any) {
+      console.error('Failed to load notifications:', error?.message || 'Unknown error');
+      setNotifications([]);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
+
+  const onRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    fetchNotifications();
+  }, [fetchNotifications]);
 
   const filterNotifications = () => {
     const now = new Date();
     
     return notifications.filter((notification) => {
       const notificationDate = new Date(notification.createdAt);
-      
+      if (Number.isNaN(notificationDate.getTime())) {
+        return false;
+      }
+
       switch (selectedFilter) {
         case 'today':
           const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -42,24 +80,27 @@ export default function NotificationPage() {
     });
   };
 
-  const handleNotificationPress = (id: string) => {
+  const handleNotificationPress = async (id: string) => {
     setNotifications(notifications.map(n => 
       n.id === id ? { ...n, isRead: true } : n
     ));
-    Alert.alert('Notification', 'Notification details coming soon!');
+    await markNotificationRead(id);
+    Alert.alert('Notification', 'Task details coming soon!');
   };
 
-  const handleMarkAsRead = (id: string) => {
+  const handleMarkAsRead = async (id: string) => {
     setNotifications(notifications.map(n => 
       n.id === id ? { ...n, isRead: true } : n
     ));
+    await markNotificationRead(id);
   };
 
-  const handleMarkAllAsRead = () => {
+  const handleMarkAllAsRead = async () => {
     const filtered = filterNotifications();
     setNotifications(notifications.map(n => 
       filtered.find(f => f.id === n.id) ? { ...n, isRead: true } : n
     ));
+    await markAllNotificationsRead();
     Alert.alert('Success', 'All notifications marked as read');
   };
 
@@ -94,26 +135,32 @@ export default function NotificationPage() {
       </View>
 
       {/* Filter Tabs */}
-      <View style={styles.filterContainer}>
-        {filters.map((filter) => (
-          <TouchableOpacity
-            key={filter.key}
-            style={[
-              styles.filterTab,
-              selectedFilter === filter.key && styles.filterTabActive,
-            ]}
-            onPress={() => setSelectedFilter(filter.key)}
-          >
-            <Text
+      <View style={styles.filterContainerWrap}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterContainer}
+        >
+          {filters.map((filter) => (
+            <TouchableOpacity
+              key={filter.key}
               style={[
-                styles.filterTabText,
-                selectedFilter === filter.key && styles.filterTabTextActive,
+                styles.filterTab,
+                selectedFilter === filter.key && styles.filterTabActive,
               ]}
+              onPress={() => setSelectedFilter(filter.key)}
             >
-              {filter.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text
+                style={[
+                  styles.filterTabText,
+                  selectedFilter === filter.key && styles.filterTabTextActive,
+                ]}
+              >
+                {filter.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
       {/* Notifications List */}
@@ -121,7 +168,11 @@ export default function NotificationPage() {
         style={styles.notificationsList}
         showsVerticalScrollIndicator={false}
       >
-        {filteredNotifications.length > 0 ? (
+        {isLoading && !isRefreshing ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>Loading notifications...</Text>
+          </View>
+        ) : filteredNotifications.length > 0 ? (
           filteredNotifications.map((notification) => (
             <NotificationCard
               key={notification.id}
@@ -184,13 +235,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  filterContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+  filterContainerWrap: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
+  },
+  filterContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    flexDirection: 'row',
   },
   filterTab: {
     paddingHorizontal: 16,

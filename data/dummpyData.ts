@@ -4,21 +4,18 @@ export const dummyUsers: User[] = [
   {
     id: '1',
     email: 'admin@office.com',
-    password: 'admin123',
     role: 'Admin',
     name: 'Admin User',
   },
   {
     id: '2',
     email: 'manager@office.com',
-    password: 'manager123',
     role: 'Manager',
     name: 'Manager User',
   },
   {
     id: '3',
     email: 'employee@office.com',
-    password: 'employee123',
     role: 'Employee',
     name: 'Employee User',
   },

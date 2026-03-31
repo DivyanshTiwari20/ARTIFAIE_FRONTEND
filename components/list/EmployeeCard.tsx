@@ -17,6 +17,7 @@ export default function EmployeeCard({
   onAssignTask,
   showAssignButton 
 }: EmployeeCardProps) {
+  const isActive = employee.isActive ?? employee.status === 'active';
   return (
     <TouchableOpacity 
       style={styles.card}
@@ -31,10 +32,10 @@ export default function EmployeeCard({
           <View style={styles.statusContainer}>
             <View style={[
               styles.statusDot, 
-              { backgroundColor: employee.status === 'active' ? '#34C759' : '#FF3B30' }
+              { backgroundColor: isActive ? '#34C759' : '#FF3B30' }
             ]} />
             <Text style={styles.statusText}>
-              {employee.status.charAt(0).toUpperCase() + employee.status.slice(1)}
+              {isActive ? 'Active' : 'Offline'}
             </Text>
           </View>
         </View>
@@ -43,12 +44,12 @@ export default function EmployeeCard({
 
       <View style={styles.stats}>
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>{employee.tasksCompleted}</Text>
+          <Text style={styles.statValue}>{employee.tasksCompleted || 0}</Text>
           <Text style={styles.statLabel}>Completed</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>{employee.tasksAssigned}</Text>
+          <Text style={styles.statValue}>{employee.tasksAssigned || 0}</Text>
           <Text style={styles.statLabel}>Assigned</Text>
         </View>
       </View>

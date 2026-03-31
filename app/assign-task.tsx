@@ -1,4 +1,5 @@
 import { dummyClients } from '@/data/dummpyData';
+import { createTask } from '@/services/api';
 import { Priority } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -23,6 +24,7 @@ export default function AssignTask() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 const [selectedDate, setSelectedDate] = useState(new Date());
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -47,22 +49,46 @@ const [selectedDate, setSelectedDate] = useState(new Date());
     }
   };
 
-  const handleAssignTask = () => {
+  const handleAssignTask = async () => {
     if (!title || !description || !deadline || !category || !selectedClient) {
       Alert.alert('Error', 'Please fill all required fields');
       return;
     }
 
-    Alert.alert(
-      'Success',
-      `Task "${title}" assigned to ${employeeName}`,
-      [
-        {
-          text: 'OK',
-          onPress: () => router.back(),
-        },
-      ]
-    );
+    try {
+      setIsSubmitting(true);
+      
+      const clientName = dummyClients.find((c) => c.id === selectedClient)?.name;
+      
+      const res = await createTask({
+        title,
+        description,
+        category,
+        priority,
+        assignedTo: employeeId,
+        clientName: clientName || '',
+        dueDate: new Date(deadlineDate).toISOString(),
+      });
+
+      if (res.success) {
+        Alert.alert(
+          'Success',
+          `Task "${title}" assigned to ${employeeName}`,
+          [
+            {
+              text: 'OK',
+              onPress: () => router.back(),
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Error', res.message || 'Failed to assign task');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Something went wrong');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   //for showing the date picker
@@ -255,9 +281,15 @@ const [selectedDate, setSelectedDate] = useState(new Date());
         </View>
 
         {/* Assign Button */}
-        <TouchableOpacity style={styles.assignButton} onPress={handleAssignTask}>
+        <TouchableOpacity 
+          style={[styles.assignButton, isSubmitting && { opacity: 0.7 }]} 
+          onPress={handleAssignTask}
+          disabled={isSubmitting}
+        >
           <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
-          <Text style={styles.assignButtonText}>Assign Task</Text>
+          <Text style={styles.assignButtonText}>
+            {isSubmitting ? 'Assigning...' : 'Assign Task'}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

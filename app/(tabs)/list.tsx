@@ -1,10 +1,14 @@
-import ClientCard from '@/components/list/ClientCard';
 import EmployeeCard from '@/components/list/EmployeeCard';
 import { useAuth } from '@/context/AuthContext';
-import { dummyClients, dummyEmployees } from '@/data/dummpyData';
+import { isAdminOrManager } from '@/lib/roles';
+import { getClientBilling, getEmployees } from '@/services/api';
+import { ClientRealisation } from '@/types';
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +19,14 @@ import {
 
 type ListTab = 'employees' | 'clients';
 
+const formatINR = (amount: number): string => {
+  if (!amount && amount !== 0) return '₹0';
+  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`;
+  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
+  if (amount >= 1000) return `₹${(amount / 1000).toFixed(1)}K`;
+  return '₹' + amount.toLocaleString('en-IN');
+};
+
 export default function List() {
   const { user } = useAuth();
   const router = useRouter();
@@ -23,35 +35,97 @@ export default function List() {
   const [activeTab, setActiveTab] = useState<ListTab>(initialTab);
   const [search, setSearch] = useState('');
 
+  // Employee data from Backend
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [isLoadingEmployees, setIsLoadingEmployees] = useState(false);
+  const [employeesError, setEmployeesError] = useState<string | null>(null);
+
+  // Client data from Tally
+  const [clients, setClients] = useState<ClientRealisation[]>([]);
+  const [isLoadingClients, setIsLoadingClients] = useState(false);
+  const [clientsError, setClientsError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   useEffect(() => {
     if (params.tab === 'clients' || params.tab === 'employees') {
       setActiveTab(params.tab as ListTab);
     }
   }, [params.tab]);
 
-  // Filter logic for search
-  const filteredEmployees = useMemo(() => {
-    if (!search.trim()) return dummyEmployees;
-    const q = search.toLowerCase();
-    return dummyEmployees.filter(emp =>
-      emp.name.toLowerCase().includes(q)
-      || emp.email?.toLowerCase().includes(q)
-      || emp.phone?.toString().includes(q)
-    );
-  }, [search]);
+  const fetchClients = useCallback(async () => {
+    try {
+      setClientsError(null);
+      setIsLoadingClients(true);
+      const res = await getClientBilling();
+      if (res.success) {
+        setClients(res.data?.clientRealisationRates || []);
+      }
+    } catch (err: any) {
+      setClientsError(err.message || 'Failed to load clients');
+    } finally {
+      setIsLoadingClients(false);
+      setIsRefreshing(false);
+    }
+  }, []);
 
-  const filteredClients = useMemo(() => {
-    if (!search.trim()) return dummyClients;
+  const fetchEmployees = useCallback(async () => {
+    try {
+      setEmployeesError(null);
+      setIsLoadingEmployees(true);
+      const res = await getEmployees();
+      if (res.success) {
+        setEmployees(res.data || []);
+      }
+    } catch (err: any) {
+      setEmployeesError(err.message || 'Failed to load employees');
+    } finally {
+      setIsLoadingEmployees(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'clients' && clients.length === 0) {
+      fetchClients();
+    } else if (activeTab === 'employees' && employees.length === 0) {
+      if (isAdminOrManager(user?.role)) {
+        fetchEmployees();
+      }
+    }
+  }, [activeTab, fetchClients, fetchEmployees, user]);
+
+  const onRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    if (activeTab === 'clients') {
+      fetchClients();
+    } else {
+      fetchEmployees();
+    }
+  }, [activeTab, fetchClients, fetchEmployees]);
+
+  // Employee search on real data
+  const filteredEmployees = useMemo(() => {
+    if (!search.trim()) return employees;
     const q = search.toLowerCase();
-    return dummyClients.filter(client =>
-      client.name.toLowerCase().includes(q)
-      || client.email?.toLowerCase().includes(q)
-      || client.phone?.toString().includes(q)
+    return employees.filter(emp =>
+      emp.name?.toLowerCase().includes(q)
+      || emp.email?.toLowerCase().includes(q)
+      || emp.role?.toLowerCase().includes(q)
     );
-  }, [search]);
+  }, [search, employees]);
+
+  // Client search on real data
+  const filteredClients = useMemo(() => {
+    if (!search.trim()) return clients;
+    const q = search.toLowerCase();
+    return clients.filter((client) => {
+      const name = client?.clientName || '';
+      return name.toLowerCase().includes(q);
+    });
+  }, [search, clients]);
 
   // Check if user has access
-  const hasAccess = user?.role === 'Admin' || user?.role === 'Manager';
+  const hasAccess = isAdminOrManager(user?.role);
 
   if (!hasAccess) {
     return (
@@ -74,12 +148,12 @@ export default function List() {
     router.push(`/employee-detail?id=${employeeId}`);
   };
 
-  const handleClientPress = (clientId: string) => {
-    router.push(`/client-detail?id=${clientId}`);
-  };
-
   const handleAssignTask = (employeeId: string, employeeName: string) => {
     router.push(`/assign-task?employeeId=${employeeId}&employeeName=${employeeName}`);
+  };
+
+  const handleClientPress = (clientName: string) => {
+    router.push(`/client-detail?clientName=${encodeURIComponent(clientName)}`);
   };
 
   return (
@@ -126,32 +200,122 @@ export default function List() {
         style={styles.listContainer}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
+        }
       >
         {activeTab === 'employees' ? (
           <>
-            <Text style={styles.countText}>{filteredEmployees.length} Employees</Text>
-            {filteredEmployees.map((employee) => (
-              <EmployeeCard
-                key={employee.id}
-                employee={employee}
-                onPress={() => handleEmployeePress(employee.id)}
-                onAssignTask={() => handleAssignTask(employee.id, employee.name)}
-                showAssignButton={true}
-              />
-            ))}
+            {isLoadingEmployees ? (
+              <View style={styles.centerState}>
+                <ActivityIndicator size="large" color="#000" />
+                <Text style={styles.stateText}>Loading employees...</Text>
+              </View>
+            ) : employeesError ? (
+              <View style={styles.centerState}>
+                <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
+                <Text style={styles.stateText}>{employeesError}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={fetchEmployees}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.countText}>{filteredEmployees.length} Employees</Text>
+                {filteredEmployees.map((employee) => (
+                  <EmployeeCard
+                    key={employee.id || employee._id}
+                    employee={{...employee, phone: employee.phone || employee.department}}
+                    onPress={() => handleEmployeePress(employee.id || employee._id)}
+                    onAssignTask={() => handleAssignTask(employee.id || employee._id, employee.name)}
+                    showAssignButton={true}
+                  />
+                ))}
+              </>
+            )}
           </>
         ) : (
           <>
-            <Text style={styles.countText}>{filteredClients.length} Clients</Text>
-            {filteredClients.map((client) => (
-              <ClientCard
-                key={client.id}
-                client={client}
-                onPress={() => handleClientPress(client.id)}
-              />
-            ))}
+            {isLoadingClients ? (
+              <View style={styles.centerState}>
+                <ActivityIndicator size="large" color="#000" />
+                <Text style={styles.stateText}>Loading clients...</Text>
+              </View>
+            ) : clientsError ? (
+              <View style={styles.centerState}>
+                <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
+                <Text style={styles.stateText}>{clientsError}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={fetchClients}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.countText}>{filteredClients.length} Clients</Text>
+                {filteredClients.map((client, index) => (
+                  <TouchableOpacity
+                    key={`${client.clientName}-${index}`}
+                    style={styles.realClientCard}
+                    onPress={() => handleClientPress(client.clientName)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.clientCardHeader}>
+                      <View style={styles.clientAvatar}>
+                        <Text style={styles.clientAvatarText}>
+                          {client.clientName?.charAt(0)?.toUpperCase() || '?'}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.clientCardName} numberOfLines={1}>
+                          {client.clientName}
+                        </Text>
+                        <Text style={styles.clientRealisation}>
+                          Realisation: {client.feeRealisationRatePercent.toFixed(1)}%
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color="#ccc" />
+                    </View>
+
+                    <View style={styles.clientCardStats}>
+                      <View style={styles.clientStatItem}>
+                        <Text style={styles.clientStatLabel}>Billed</Text>
+                        <Text style={styles.clientStatValue}>{formatINR(client.totalBilled)}</Text>
+                      </View>
+                      <View style={styles.clientStatItem}>
+                        <Text style={styles.clientStatLabel}>Collected</Text>
+                        <Text style={[styles.clientStatValue, { color: '#16a34a' }]}>
+                          {formatINR(client.totalCollected)}
+                        </Text>
+                      </View>
+                      <View style={styles.clientStatItem}>
+                        <Text style={styles.clientStatLabel}>Pending</Text>
+                        <Text style={[styles.clientStatValue, { color: '#dc2626' }]}>
+                          {formatINR(client.totalBilled - client.totalCollected)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Realisation Progress Bar */}
+                    <View style={styles.progressBarBg}>
+                      <View
+                        style={[
+                          styles.progressBarFill,
+                          {
+                            width: `${Math.min(client.feeRealisationRatePercent, 100)}%`,
+                            backgroundColor: client.feeRealisationRatePercent >= 80 ? '#16a34a'
+                              : client.feeRealisationRatePercent >= 50 ? '#d97706'
+                              : '#dc2626',
+                          },
+                        ]}
+                      />
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </>
+            )}
           </>
         )}
+        <View style={{ height: 20 }} />
       </ScrollView>
     </View>
   );
@@ -173,7 +337,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000000',
   },
-  // --- Search Bar styles ---
   searchBarContainer: {
     paddingHorizontal: 20,
     paddingBottom: 12,
@@ -190,7 +353,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0E0E0',
   },
-  //-------------------------
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
@@ -250,5 +412,101 @@ const styles = StyleSheet.create({
     color: '#666666',
     textAlign: 'center',
     lineHeight: 24,
+  },
+  // Loading & Error states
+  centerState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  stateText: {
+    fontSize: 15,
+    color: '#999',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: '#000',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+  },
+  // Real Client Cards
+  realClientCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  clientCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  clientAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#E8E4F3',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  clientAvatarText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#6B4EFF',
+  },
+  clientCardName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111',
+  },
+  clientRealisation: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  clientCardStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+  },
+  clientStatItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  clientStatLabel: {
+    fontSize: 11,
+    color: '#999',
+    marginBottom: 2,
+  },
+  clientStatValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111',
+  },
+  progressBarBg: {
+    height: 6,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 3,
   },
 });

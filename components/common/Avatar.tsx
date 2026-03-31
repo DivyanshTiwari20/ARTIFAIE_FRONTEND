@@ -7,7 +7,7 @@ interface AvatarProps {
 }
 
 export default function Avatar({ name, size = 40 }: AvatarProps) {
-  const initial = name.charAt(0).toUpperCase();
+  const initial = name?.charAt(0)?.toUpperCase() || '?';
   
   return (
     <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>

@@ -12,144 +12,31 @@ import {
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
-type WorkStatus = 'pending' | 'cancelled' | 'completed';
+import { getEmployees } from '@/services/api';
 
-type EmployeeRow = {
-  id: string;
-  name: string;
-  email: string;
-  salary: string;
-  address: string;
-  gender: string;
-  phone: string;
-  status: WorkStatus;
-};
-
-const initialEmployees: EmployeeRow[] = [
-  {
-    id: '1',
-    name: 'Aarav Sharma',
-    email: 'aarav.sharma@office.com',
-    salary: '₹80,000',
-    address: 'Mumbai, MH',
-    gender: 'Male',
-    phone: '+91 98765 10001',
-    status: 'pending',
-  },
-  {
-    id: '2',
-    name: 'Isha Verma',
-    email: 'isha.verma@office.com',
-    salary: '₹72,500',
-    address: 'Pune, MH',
-    gender: 'Female',
-    phone: '+91 98765 10002',
-    status: 'completed',
-  },
-  {
-    id: '3',
-    name: 'Karan Mehta',
-    email: 'karan.mehta@office.com',
-    salary: '₹65,000',
-    address: 'Delhi, DL',
-    gender: 'Male',
-    phone: '+91 98765 10003',
-    status: 'cancelled',
-  },
-  {
-    id: '4',
-    name: 'Megha Singh',
-    email: 'megha.singh@office.com',
-    salary: '₹77,000',
-    address: 'Bengaluru, KA',
-    gender: 'Female',
-    phone: '+91 98765 10004',
-    status: 'pending',
-  },
-  {
-    id: '5',
-    name: 'Rohan Das',
-    email: 'rohan.das@office.com',
-    salary: '₹68,500',
-    address: 'Kolkata, WB',
-    gender: 'Male',
-    phone: '+91 98765 10005',
-    status: 'completed',
-  },
-];
-
-// --- Dropdown component for status selection ---
-type StatusDropdownProps = {
-  visible: boolean;
-  onClose: () => void;
-  onSelect: (value: WorkStatus) => void;
-  currentStatus: WorkStatus;
-};
-
-const statuses: WorkStatus[] = ['pending', 'cancelled', 'completed'];
-
-function StatusDropdown({ visible, onClose, onSelect, currentStatus }: StatusDropdownProps) {
-  return (
-    <Modal
-      visible={visible}
-      animationType="fade"
-      transparent
-      onRequestClose={onClose}
-    >
-      <Pressable style={styles.dropdownOverlay} onPress={onClose}>
-        <View style={styles.dropdownContainer}>
-          <Text style={styles.dropdownTitle}>Select Status</Text>
-          {statuses.map((status) => (
-            <TouchableOpacity
-              key={status}
-              style={[
-                styles.dropdownOption,
-                currentStatus === status && styles.dropdownOptionSelected,
-              ]}
-              onPress={() => {
-                onSelect(status);
-                onClose();
-              }}
-            >
-              <Text
-                style={[
-                  styles.dropdownOptionText,
-                  currentStatus === status && styles.dropdownOptionTextSelected,
-                ]}
-              >
-                {statusLabels[status]}
-              </Text>
-              {currentStatus === status && (
-                <Ionicons name="checkmark" size={18} color="#3578e5" />
-              )}
-            </TouchableOpacity>
-          ))}
-        </View>
-      </Pressable>
-    </Modal>
-  );
-}
+// Removed manual work status dropdown component because work status applies to tasks, not employees in DB.
 
 export default function EmployeeList() {
   const { user } = useAuth();
   const router = useRouter();
-  const [employees, setEmployees] = useState<EmployeeRow[]>(initialEmployees);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [dropdownOpenFor, setDropdownOpenFor] = useState<string | null>(null);
-
-  const canEdit = useMemo(
-    () => user?.role === 'Admin' || user?.role === 'Manager',
-    [user?.role]
-  );
-
-  const handleStatusChange = (id: string, status: WorkStatus) => {
-    if (!canEdit) return;
-    setEmployees((prev) =>
-      prev.map((employee) =>
-        employee.id === id ? { ...employee, status } : employee
-      )
-    );
-  };
+  React.useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const res = await getEmployees();
+        if (res.success) {
+          setEmployees(res.data);
+        }
+      } catch (err) {
+        console.error('Failed to load employees:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchUsers();
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -167,95 +54,60 @@ export default function EmployeeList() {
         </Text>
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 20 }}
-      >
-        <View style={styles.table}>
-          <View style={[styles.row, styles.headerRow]}>
-            <Text style={[styles.cell, styles.headerCell, { flex: 0.5 }]}>
-              S.No
-            </Text>
-            <Text style={[styles.cell, styles.headerCell]}>Name</Text>
-            <Text style={[styles.cell, styles.headerCell]}>Email</Text>
-            <Text style={[styles.cell, styles.headerCell]}>Salary</Text>
-            <Text style={[styles.cell, styles.headerCell]}>Address</Text>
-            <Text style={[styles.cell, styles.headerCell]}>Gender</Text>
-            <Text style={[styles.cell, styles.headerCell]}>Phone Number</Text>
-            <Text style={[styles.cell, styles.headerCell]}>Work</Text>
-          </View>
-
-          {employees.map((employee, index) => (
-            <View key={employee.id} style={[styles.row, styles.dataRow]}>
-              <Text style={[styles.cell, { flex: 0.5 }]}>{index + 1}</Text>
-              <Text style={styles.cell}>{employee.name}</Text>
-              <Text style={styles.cell}>{employee.email}</Text>
-              <Text style={styles.cell}>{employee.salary}</Text>
-              <Text style={styles.cell}>{employee.address}</Text>
-              <Text style={styles.cell}>{employee.gender}</Text>
-              <Text style={styles.cell}>{employee.phone}</Text>
-              <View style={[styles.cell, styles.statusCell]}>
-                {/* Status badge */}
-                <View
-                  style={[
-                    styles.statusBadge,
-                    statusStyles[employee.status].badge,
-                  ]}
-                >
-                  <Text style={statusStyles[employee.status].text}>
-                    {statusLabels[employee.status]}
-                  </Text>
-                </View>
-                {/* Dropdown for work status */}
-                {canEdit && (
-                  <>
-                    <TouchableOpacity
-                      style={styles.statusDropdownButton}
-                      onPress={() =>
-                        setDropdownOpenFor(employee.id)
-                      }
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.statusDropdownButtonText}>
-                        Change Status
-                      </Text>
-                      <Ionicons
-                        name={
-                          dropdownOpenFor === employee.id
-                            ? 'chevron-up'
-                            : 'chevron-down'
-                        }
-                        size={16}
-                        color="#666"
-                        style={{ marginLeft: 3, marginTop: 1 }}
-                      />
-                    </TouchableOpacity>
-                    <StatusDropdown
-                      visible={dropdownOpenFor === employee.id}
-                      currentStatus={employee.status}
-                      onSelect={(val) => handleStatusChange(employee.id, val)}
-                      onClose={() => setDropdownOpenFor(null)}
-                    />
-                  </>
-                )}
-              </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 20 }}
+        >
+          <View style={styles.table}>
+            <View style={[styles.row, styles.headerRow]}>
+              <Text style={[styles.cell, styles.headerCell, { flex: 0.5 }]}>
+                S.No
+              </Text>
+              <Text style={[styles.cell, styles.headerCell]}>Name</Text>
+              <Text style={[styles.cell, styles.headerCell]}>Email</Text>
+              <Text style={[styles.cell, styles.headerCell]}>Role</Text>
+              <Text style={[styles.cell, styles.headerCell]}>Department</Text>
+              <Text style={[styles.cell, styles.headerCell]}>Joined</Text>
+              <Text style={[styles.cell, styles.headerCell]}>System Access</Text>
             </View>
-          ))}
-        </View>
+
+            {employees.map((employee, index) => (
+              <View key={employee.id} style={[styles.row, styles.dataRow]}>
+                <Text style={[styles.cell, { flex: 0.5 }]}>{index + 1}</Text>
+                <Text style={styles.cell}>{employee.name}</Text>
+                <Text style={styles.cell}>{employee.email}</Text>
+                <Text style={styles.cell}>{employee.role?.toUpperCase()}</Text>
+                <Text style={styles.cell}>{employee.department || '-'}</Text>
+                <Text style={styles.cell}>
+                  {new Date(employee.createdAt).toLocaleDateString()}
+                </Text>
+                <View style={[styles.cell, styles.statusCell]}>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      employee.isActive ? statusStyles.completed.badge : statusStyles.cancelled.badge
+                    ]}
+                  >
+                    <Text style={employee.isActive ? statusStyles.completed.text : statusStyles.cancelled.text}>
+                      {employee.isActive ? 'Active' : 'Disabled'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
       </ScrollView>
     </View>
   );
 }
 
-const statusLabels: Record<WorkStatus, string> = {
-  pending: 'Pending',
-  cancelled: 'Cancelled',
-  completed: 'Completed',
-};
+
 
 const statusStyles: Record<
-  WorkStatus,
+  string,
   { badge: object; text: object }
 > = {
   pending: {

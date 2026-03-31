@@ -1,9 +1,11 @@
-import { dummyNotifications, dummyTasks } from '@/data/dummpyData';
+import { dummyNotifications } from '@/data/dummpyData';
+import { getClientBilling, getBankPosition, getProfitLoss, getReceivables } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
+  ActivityIndicator,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,20 +17,141 @@ import NotificationBadge from '../../components/common/NotificationBadge';
 import QuickNotificationModal from '../../components/notification/QuickNotificationModal';
 import { useAuth } from '../../context/AuthContext';
 
+// Helper to format Indian currency
+const formatINR = (amount: number): string => {
+  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`;
+  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
+  if (amount >= 1000) return `₹${(amount / 1000).toFixed(1)}K`;
+  return `₹${amount.toFixed(0)}`;
+};
+
+interface DashboardStats {
+  // From receivables
+  totalOutstanding: number;
+  overdueBills: number;
+  totalBills: number;
+  mtdCollections: number;
+  // From P&L
+  totalRevenue: number;
+  totalExpenses: number;
+  netProfit: number;
+  netProfitMargin: number;
+  revenueChange: number;
+  // From bank position
+  totalLiquidFunds: number;
+  totalBankBalance: number;
+  totalCashBalance: number;
+  // From client billing
+  totalClients: number;
+  paidInvoices: number;
+  unpaidInvoices: number;
+}
+
 export default function Home() {
   const { user } = useAuth();
   const router = useRouter();
-  const [selectedFilter, setSelectedFilter] = useState('all');
-  const [tasks, setTasks] = useState(dummyTasks);
   const [searchQuery, setSearchQuery] = useState('');
   const [notifications, setNotifications] = useState(dummyNotifications);
   const [showQuickNotifications, setShowQuickNotifications] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<DashboardStats>({
+    totalOutstanding: 0,
+    overdueBills: 0,
+    totalBills: 0,
+    mtdCollections: 0,
+    totalRevenue: 0,
+    totalExpenses: 0,
+    netProfit: 0,
+    netProfitMargin: 0,
+    revenueChange: 0,
+    totalLiquidFunds: 0,
+    totalBankBalance: 0,
+    totalCashBalance: 0,
+    totalClients: 0,
+    paidInvoices: 0,
+    unpaidInvoices: 0,
+  });
+
+  const fetchDashboardData = useCallback(async () => {
+    try {
+      setError(null);
+
+      // Fetch all data in parallel
+      const [receivablesRes, plRes, bankRes, billingRes] = await Promise.allSettled([
+        getReceivables(),
+        getProfitLoss(),
+        getBankPosition(),
+        getClientBilling(),
+      ]);
+
+      const newStats: DashboardStats = { ...stats };
+
+      // Process Receivables
+      if (receivablesRes.status === 'fulfilled' && receivablesRes.value.success) {
+        const data = receivablesRes.value.data;
+        newStats.totalOutstanding = data?.summary?.totalOutstanding || 0;
+        newStats.overdueBills = data?.summary?.overdueBills || 0;
+        newStats.totalBills = data?.summary?.totalBills || 0;
+        newStats.mtdCollections = data?.summary?.mtdCollections || 0;
+      }
+
+      // Process Profit & Loss
+      if (plRes.status === 'fulfilled' && plRes.value.success) {
+        const derived = plRes.value.data?.derived;
+        if (derived) {
+          newStats.totalRevenue = derived.totalRevenue || 0;
+          newStats.totalExpenses = derived.totalExpenses || 0;
+          newStats.netProfit = derived.netProfit || 0;
+          newStats.netProfitMargin = derived.netProfitMarginPercent || 0;
+          newStats.revenueChange = derived.revenueVsLastMonth?.changePercent || 0;
+        }
+      }
+
+      // Process Bank Position
+      if (bankRes.status === 'fulfilled' && bankRes.value.success) {
+        const data = bankRes.value.data;
+        newStats.totalLiquidFunds = data?.derived?.totalLiquidFunds || 0;
+        newStats.totalBankBalance = data?.totalBankBalance || 0;
+        newStats.totalCashBalance = data?.totalCashBalance || 0;
+      }
+
+      // Process Client Billing
+      if (billingRes.status === 'fulfilled' && billingRes.value.success) {
+        const data = billingRes.value.data;
+        const clientRates = data?.clientRealisationRates || [];
+        newStats.totalClients = clientRates.length;
+        newStats.paidInvoices = data?.summary?.paidCount || 0;
+        newStats.unpaidInvoices = (data?.summary?.partialCount || 0) + (data?.summary?.unpaidCount || 0);
+      }
+
+      setStats(newStats);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load dashboard data');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
+
+  const onRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   const getLast24HoursNotifications = () => {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    return notifications.filter(
-      (n) => new Date(n.createdAt) > twentyFourHoursAgo
-    );
+    if (!Array.isArray(notifications)) return [];
+    return notifications.filter((n) => {
+      if (!n || !n.createdAt) return false;
+      const date = new Date(n.createdAt);
+      return !isNaN(date.getTime()) && date > twentyFourHoursAgo;
+    });
   };
 
   const getUnreadCount = () => {
@@ -39,48 +162,7 @@ export default function Home() {
     setNotifications(notifications.map(n =>
       n.id === id ? { ...n, isRead: true } : n
     ));
-    Alert.alert('Notification', 'Notification details coming soon!');
   };
-
-  const handleMarkAllAsRead = () => {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    setNotifications(notifications.map(n =>
-      new Date(n.createdAt) > twentyFourHoursAgo ? { ...n, isRead: true } : n
-    ));
-  };
-
-  // Dashboard stats
-  const activeClients = 45;
-  const invoicesDue = 3;
-  const expiringLicenses = 5;
-
-  // Filter options
-  const filters = ['All', 'Active', 'Expiring', 'This Week', 'Last Month'];
-
-  // Mock client data
-  const clients = [
-    {
-      id: '1',
-      companyName: 'Legal business',
-      services: ['Tax consultancy', 'market research'],
-      invoiceSent: '12-08-2025',
-      payment: '12-08-2025',
-    },
-    {
-      id: '2',
-      companyName: 'Legal business',
-      services: ['Tax consultancy', 'market research'],
-      invoiceSent: '12-08-2025',
-      payment: '12-08-2025',
-    },
-  ];
-
-  // Handler to open client-detail page
-  const handleClientPress = (clientId: string) => {
-    router.push(`/client-detail?id=${clientId}`);
-  };
-
-  const pendingTasksCount = dummyTasks.filter(t => t.status === 'pending').length;
 
   return (
     <View style={styles.container}>
@@ -111,123 +193,166 @@ export default function Home() {
         </View>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Filter Chips */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterScroll}
-          contentContainerStyle={styles.filterContent}
-        >
-          {filters.map((filter, index) => (
-            <TouchableOpacity
-              key={index}
-              style={[
-                styles.filterChip,
-                filter === 'All' && styles.filterChipActive,
-              ]}
-              onPress={() => { }}
-            >
-              <Text
-                style={[
-                  styles.filterChipText,
-                  filter === 'All' && styles.filterChipTextActive,
-                ]}
-              >
-                {filter}
-              </Text>
+      <ScrollView
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
+        }
+      >
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#000000" />
+            <Text style={styles.loadingText}>Loading dashboard...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.errorContainer}>
+            <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
+            <Text style={styles.errorTitle}>Failed to load data</Text>
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={onRefresh}>
+              <Text style={styles.retryButtonText}>Tap to Retry</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Stats Grid */}
-        <View style={styles.statsGrid}>
-          <View style={[styles.statCard, { backgroundColor: '#A7F3D0' }]}>
-            <View style={styles.statHeader}>
-              <Text style={styles.statTitleColor}>Active Clients</Text>
-              <Ionicons name="people-outline" size={22} color="#000" />
-            </View>
-            <Text style={styles.statValueStyle}>{activeClients}</Text>
-            <Text style={styles.statSubtextStyle}>Total active instances</Text>
           </View>
+        ) : (
+          <>
+            {/* Financial Overview Row */}
+            <View style={styles.overviewCard}>
+              <View style={styles.overviewHeader}>
+                <Text style={styles.overviewTitle}>Financial Overview</Text>
+                <View style={[
+                  styles.changeBadge,
+                  { backgroundColor: stats.revenueChange >= 0 ? '#dcfce7' : '#fee2e2' }
+                ]}>
+                  <Ionicons
+                    name={stats.revenueChange >= 0 ? 'trending-up' : 'trending-down'}
+                    size={14}
+                    color={stats.revenueChange >= 0 ? '#16a34a' : '#dc2626'}
+                  />
+                  <Text style={[
+                    styles.changeText,
+                    { color: stats.revenueChange >= 0 ? '#16a34a' : '#dc2626' }
+                  ]}>
+                    {Math.abs(stats.revenueChange).toFixed(1)}% vs last month
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.overviewRow}>
+                <View style={styles.overviewItem}>
+                  <Text style={styles.overviewLabel}>Revenue</Text>
+                  <Text style={styles.overviewValue}>{formatINR(stats.totalRevenue)}</Text>
+                </View>
+                <View style={styles.overviewDivider} />
+                <View style={styles.overviewItem}>
+                  <Text style={styles.overviewLabel}>Expenses</Text>
+                  <Text style={styles.overviewValue}>{formatINR(stats.totalExpenses)}</Text>
+                </View>
+                <View style={styles.overviewDivider} />
+                <View style={styles.overviewItem}>
+                  <Text style={styles.overviewLabel}>Net Profit</Text>
+                  <Text style={[styles.overviewValue, { color: stats.netProfit >= 0 ? '#16a34a' : '#dc2626' }]}>
+                    {formatINR(stats.netProfit)}
+                  </Text>
+                </View>
+              </View>
+            </View>
 
-          <View style={[styles.statCard, { backgroundColor: '#8ECAFF' }]}>
-            <View style={styles.statHeader}>
-              <Text style={styles.statTitleColor}>Invoices Due</Text>
-              <Ionicons name="receipt-outline" size={22} color="#000" />
-            </View>
-            <Text style={styles.statValueStyle}>3</Text>
-            <Text style={styles.statSubtextStyle}>Total amount: ₹12K</Text>
-          </View>
+            {/* Stats Grid */}
+            <View style={styles.statsGrid}>
+              <View style={[styles.statCard, { backgroundColor: '#A7F3D0' }]}>
+                <View style={styles.statHeader}>
+                  <Text style={styles.statTitleColor}>Liquid Funds</Text>
+                  <Ionicons name="wallet-outline" size={22} color="#000" />
+                </View>
+                <Text style={styles.statValueStyle}>{formatINR(stats.totalLiquidFunds)}</Text>
+                <Text style={styles.statSubtextStyle}>
+                  Bank: {formatINR(stats.totalBankBalance)} • Cash: {formatINR(stats.totalCashBalance)}
+                </Text>
+              </View>
 
-          <View style={[styles.statCard, { backgroundColor: '#FDE46E' }]}>
-            <View style={styles.statHeader}>
-              <Text style={styles.statTitleColor}>Tasks Pending</Text>
-              <Ionicons name="create-outline" size={22} color="#000" />
-            </View>
-            <Text style={styles.statValueStyle}>{pendingTasksCount}</Text>
-            <Text style={styles.statSubtextStyle}>1 high priority item</Text>
-          </View>
+              <View style={[styles.statCard, { backgroundColor: '#8ECAFF' }]}>
+                <View style={styles.statHeader}>
+                  <Text style={styles.statTitleColor}>Outstanding</Text>
+                  <Ionicons name="receipt-outline" size={22} color="#000" />
+                </View>
+                <Text style={styles.statValueStyle}>{formatINR(stats.totalOutstanding)}</Text>
+                <Text style={styles.statSubtextStyle}>{stats.overdueBills} overdue bills</Text>
+              </View>
 
-          <View style={[styles.statCard, { backgroundColor: '#FECACA' }]}>
-            <View style={styles.statHeader}>
-              <Text style={styles.statTitleColor}>Expiring Licenses</Text>
-              <Ionicons name="warning-outline" size={22} color="#000" />
-            </View>
-            <Text style={styles.statValueStyle}>{expiringLicenses}</Text>
-            <Text style={styles.statSubtextStyle}>Expiring in next 30 days</Text>
-          </View>
-        </View>
+              <View style={[styles.statCard, { backgroundColor: '#FDE46E' }]}>
+                <View style={styles.statHeader}>
+                  <Text style={styles.statTitleColor}>MTD Collections</Text>
+                  <Ionicons name="cash-outline" size={22} color="#000" />
+                </View>
+                <Text style={styles.statValueStyle}>{formatINR(stats.mtdCollections)}</Text>
+                <Text style={styles.statSubtextStyle}>This month received</Text>
+              </View>
 
-        {/* Directories Section */}
-        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Directories</Text>
+              <View style={[styles.statCard, { backgroundColor: '#FECACA' }]}>
+                <View style={styles.statHeader}>
+                  <Text style={styles.statTitleColor}>Profit Margin</Text>
+                  <Ionicons name="analytics-outline" size={22} color="#000" />
+                </View>
+                <Text style={styles.statValueStyle}>{stats.netProfitMargin.toFixed(1)}%</Text>
+                <Text style={styles.statSubtextStyle}>Net profit margin</Text>
+              </View>
+            </View>
 
-        <View style={styles.directoryGrid}>
-          {/* Employee Card */}
-          <TouchableOpacity
-            style={styles.directoryCard}
-            onPress={() => router.push('/list?tab=employees')}
-          >
-            <View style={[styles.directoryIconContainer, { backgroundColor: '#E8E4F3' }]}>
-              <Ionicons name="people" size={24} color="#6B4EFF" />
-            </View>
-            <View style={styles.directoryInfo}>
-              <Text style={styles.directoryTitle}>Employees</Text>
-              <Text style={styles.directoryStats}>Total: 12 • Active: 8</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
-          </TouchableOpacity>
+            {/* Directories Section */}
+            <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Directories</Text>
 
-          {/* Client Card */}
-          <TouchableOpacity
-            style={styles.directoryCard}
-            onPress={() => router.push('/list?tab=clients')}
-          >
-            <View style={[styles.directoryIconContainer, { backgroundColor: '#E4F4E8' }]}>
-              <Ionicons name="briefcase" size={24} color="#4CAF50" />
-            </View>
-            <View style={styles.directoryInfo}>
-              <Text style={styles.directoryTitle}>Clients</Text>
-              <Text style={styles.directoryStats}>Total: 45 • Active: 32</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
-          </TouchableOpacity>
+            <View style={styles.directoryGrid}>
+              {/* Employee Card */}
+              <TouchableOpacity
+                style={styles.directoryCard}
+                onPress={() => router.push('/list?tab=employees')}
+              >
+                <View style={[styles.directoryIconContainer, { backgroundColor: '#E8E4F3' }]}>
+                  <Ionicons name="people" size={24} color="#6B4EFF" />
+                </View>
+                <View style={styles.directoryInfo}>
+                  <Text style={styles.directoryTitle}>Employees</Text>
+                  <Text style={styles.directoryStats}>View team members</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
+              </TouchableOpacity>
 
-          {/* Invoice Card */}
-          <TouchableOpacity
-            style={styles.directoryCard}
-            onPress={() => router.push('/invoices' as any)}
-          >
-            <View style={[styles.directoryIconContainer, { backgroundColor: '#FDECE8' }]}>
-              <Ionicons name="receipt" size={24} color="#FF6B6B" />
+              {/* Client Card */}
+              <TouchableOpacity
+                style={styles.directoryCard}
+                onPress={() => router.push('/list?tab=clients')}
+              >
+                <View style={[styles.directoryIconContainer, { backgroundColor: '#E4F4E8' }]}>
+                  <Ionicons name="briefcase" size={24} color="#4CAF50" />
+                </View>
+                <View style={styles.directoryInfo}>
+                  <Text style={styles.directoryTitle}>Clients</Text>
+                  <Text style={styles.directoryStats}>
+                    {stats.totalClients > 0 ? `${stats.totalClients} active clients` : 'View client billing'}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
+              </TouchableOpacity>
+
+              {/* Invoice Card */}
+              <TouchableOpacity
+                style={styles.directoryCard}
+                onPress={() => router.push('/invoices' as any)}
+              >
+                <View style={[styles.directoryIconContainer, { backgroundColor: '#FDECE8' }]}>
+                  <Ionicons name="receipt" size={24} color="#FF6B6B" />
+                </View>
+                <View style={styles.directoryInfo}>
+                  <Text style={styles.directoryTitle}>Invoices</Text>
+                  <Text style={styles.directoryStats}>
+                    Paid: {stats.paidInvoices} • Due: {stats.unpaidInvoices}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
+              </TouchableOpacity>
             </View>
-            <View style={styles.directoryInfo}>
-              <Text style={styles.directoryTitle}>Invoices</Text>
-              <Text style={styles.directoryStats}>Pending: 3 • Paid: 12</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
-          </TouchableOpacity>
-        </View>
+          </>
+        )}
       </ScrollView>
 
       {/* Quick Notification Modal */}
@@ -290,35 +415,103 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  filterScroll: {
-    marginBottom: 16,
+  // Loading & Error States
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
   },
-  filterContent: {
-    paddingHorizontal: 20,
-    gap: 8,
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666666',
   },
-  filterChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-    marginRight: 8,
+  errorContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 30,
   },
-  filterChipActive: {
-    backgroundColor: '#E8E4F3',
-    borderColor: '#E8E4F3',
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
+    marginTop: 12,
   },
-  filterChipText: {
+  errorText: {
     fontSize: 14,
     color: '#666666',
-    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 8,
   },
-  filterChipTextActive: {
-    color: '#6B4EFF',
+  retryButton: {
+    marginTop: 20,
+    backgroundColor: '#000000',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  // Financial Overview Card
+  overviewCard: {
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 20,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+  },
+  overviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  overviewTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  changeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  changeText: {
+    fontSize: 12,
     fontWeight: '600',
   },
+  overviewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  overviewItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  overviewLabel: {
+    fontSize: 12,
+    color: '#a0aec0',
+    marginBottom: 4,
+  },
+  overviewValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  overviewDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: '#374151',
+  },
+  // Stats Grid
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -347,13 +540,13 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   statValueStyle: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#000000',
     marginBottom: 2,
   },
   statSubtextStyle: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#333333',
     opacity: 0.8,
   },
@@ -363,68 +556,6 @@ const styles = StyleSheet.create({
     color: '#000000',
     paddingHorizontal: 20,
     marginBottom: 16,
-  },
-  clientCard: {
-    backgroundColor: '#F5F5F5',
-    marginHorizontal: 20,
-    marginBottom: 12,
-    borderRadius: 12,
-    padding: 16,
-  },
-  clientHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  clientAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E8E4F3',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  clientAvatarText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#6B4EFF',
-  },
-  clientInfo: {
-    flex: 1,
-  },
-  clientCompany: {
-    fontSize: 12,
-    color: '#666666',
-    marginBottom: 2,
-  },
-  clientName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000000',
-  },
-  clientDetails: {
-    borderTopWidth: 1,
-    borderTopColor: '#E5E5E5',
-    paddingTop: 12,
-  },
-  clientServices: {
-    fontSize: 14,
-    color: '#000000',
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  clientDates: {
-    gap: 4,
-  },
-  clientDateLabel: {
-    fontSize: 12,
-    color: '#666666',
-  },
-  clientDate: {
-    fontSize: 12,
-    color: '#000000',
-    fontWeight: '500',
   },
   directoryGrid: {
     paddingHorizontal: 20,

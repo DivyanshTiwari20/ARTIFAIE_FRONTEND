@@ -46,6 +46,9 @@ export default function NotificationCard({
 
   const getTimeAgo = (dateString: string) => {
     const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) {
+      return '';
+    }
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -71,16 +74,16 @@ export default function NotificationCard({
       <View style={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title} numberOfLines={1}>
-            {notification.title}
+            {notification.title ?? 'Notification'}
           </Text>
           {!notification.isRead && <View style={styles.unreadDot} />}
         </View>
         
         <Text style={styles.message} numberOfLines={2}>
-          {notification.message}
+          {notification.message ?? ''}
         </Text>
         
-        <Text style={styles.time}>{getTimeAgo(notification.createdAt)}</Text>
+        <Text style={styles.time}>{getTimeAgo(notification.createdAt ?? '')}</Text>
       </View>
     </TouchableOpacity>
   );

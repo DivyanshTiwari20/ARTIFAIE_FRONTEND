@@ -1,10 +1,11 @@
 import { useAuth } from '@/context/AuthContext';
+import { isEmployeeRole } from '@/lib/roles';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
 export default function TabLayout() {
   const { user } = useAuth();
-  const isEmployee = user?.role === 'Employee';
+  const isEmployee = isEmployeeRole(user?.role);
 
   return (
     <Tabs

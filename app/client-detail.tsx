@@ -1,299 +1,339 @@
-import { Picker } from '@react-native-picker/picker';
-import { Building, Calendar, Check, ChevronDown, ChevronUp, Clock, CreditCard, DollarSign, FileCheck, FileText, User } from 'lucide-react-native';
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { getClientBilling, getReceivables } from '@/services/api';
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
-interface Task {
-  id: number;
-  name: string;
-  completed: boolean;
-}
+const formatINR = (amount: number): string => {
+  if (!amount && amount !== 0) return '₹0';
+  return '₹' + Math.abs(amount).toLocaleString('en-IN');
+};
 
-interface WorkflowStage {
-  id: number;
-  name: string;
-  icon: React.ComponentType<{ size?: number; color?: string }>;
-  status: 'completed' | 'in_progress' | 'pending' | 'cancelled';
-  description: string;
-  tasks: Task[];
-}
+const formatDate = (dateStr: string): string => {
+  if (!dateStr) return '-';
+  if (dateStr.length === 8 && !dateStr.includes('-')) {
+    const y = dateStr.substring(0, 4);
+    const m = dateStr.substring(4, 6);
+    const d = dateStr.substring(6, 8);
+    return `${d}/${m}/${y}`;
+  }
+  if (dateStr.includes('-')) {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return dateStr;
+};
 
-interface StatusConfig {
-  bg: string;
-  text: string;
-  label: string;
-  dotColor: string;
-}
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case 'Paid': return { bg: '#dcfce7', text: '#16a34a' };
+    case 'Partial': return { bg: '#fef3c7', text: '#d97706' };
+    case 'Unpaid': return { bg: '#fee2e2', text: '#dc2626' };
+    case 'Overdue': return { bg: '#fecaca', text: '#991b1b' };
+    default: return { bg: '#f3f4f6', text: '#6b7280' };
+  }
+};
 
-interface ClientData {
-  name: string;
-  company: string;
-  status: string;
+interface ClientInvoice {
+  voucherNumber: string;
+  date: string;
+  clientName: string;
+  narration: string;
+  grossAmount: string;
+  outstandingAmount: string;
   paymentStatus: string;
-  workStatus: string;
-  invoiceSentDate: string;
-  deadlineDate: string;
-  services: string[];
+  amountCollected: number;
 }
 
-const ClientProfileScreen: React.FC = () => {
-  const [expandedStage, setExpandedStage] = useState<number>(0);
-  
-  const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([
-    {
-      id: 1,
-      name: 'Incorporation',
-      icon: Building,
-      status: 'completed',
-      description: 'Registering entity with state authorities.',
-      tasks: [
-        { id: 1, name: 'Name Reservation', completed: true },
-        { id: 2, name: 'File Articles of Organization', completed: true }
-      ]
-    },
-    {
-      id: 2,
-      name: 'Tax Registration',
-      icon: FileCheck,
-      status: 'in_progress',
-      description: 'Setting up tax identification and registration.',
-      tasks: [
-        { id: 1, name: 'Apply for EIN', completed: true },
-        { id: 2, name: 'State Tax Registration', completed: false }
-      ]
-    },
-    {
-      id: 3,
-      name: 'Banking Setup',
-      icon: CreditCard,
-      status: 'pending',
-      description: 'Opening business bank accounts and payment systems.',
-      tasks: [
-        { id: 1, name: 'Open Business Account', completed: false },
-        { id: 2, name: 'Setup Payment Gateway', completed: false }
-      ]
+interface ClientReceivable {
+  clientName: string;
+  billRef: string;
+  billDate: string;
+  dueDate: string;
+  billAmount: string;
+  pendingAmount: string;
+  daysOverdue: number;
+  isOverdue: boolean;
+  ageingBucket: string;
+  dueDateFormatted: string;
+}
+
+export default function ClientDetailScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ clientName?: string; id?: string }>();
+  const clientName = params.clientName ? decodeURIComponent(params.clientName) : '';
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [invoices, setInvoices] = useState<ClientInvoice[]>([]);
+  const [receivables, setReceivables] = useState<ClientReceivable[]>([]);
+  const [realisationRate, setRealisationRate] = useState(0);
+  const [totalBilled, setTotalBilled] = useState(0);
+  const [totalCollected, setTotalCollected] = useState(0);
+  const [summary, setSummary] = useState({ paidCount: 0, partialCount: 0, unpaidCount: 0, totalInvoices: 0 });
+
+  const fetchClientData = useCallback(async () => {
+    if (!clientName) return;
+    try {
+      setError(null);
+      const [billingRes, receivablesRes] = await Promise.allSettled([
+        getClientBilling(clientName),
+        getReceivables(),
+      ]);
+
+      // Process billing
+      if (billingRes.status === 'fulfilled' && billingRes.value.success) {
+        const data = billingRes.value.data;
+        setInvoices(data?.invoices || []);
+        setSummary(data?.summary || { paidCount: 0, partialCount: 0, unpaidCount: 0, totalInvoices: 0 });
+
+        const clientRate = (data?.clientRealisationRates || []).find(
+          (r: any) => r.clientName === clientName
+        );
+        if (clientRate) {
+          setRealisationRate(clientRate.feeRealisationRatePercent);
+          setTotalBilled(clientRate.totalBilled);
+          setTotalCollected(clientRate.totalCollected);
+        }
+      }
+
+      // Process receivables — filter by client name
+      if (receivablesRes.status === 'fulfilled' && receivablesRes.value.success) {
+        const allBills = receivablesRes.value.data?.bills || [];
+        const clientBills = allBills.filter(
+          (b: any) => b.clientName?.toLowerCase() === clientName.toLowerCase()
+        );
+        setReceivables(clientBills);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load client data');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
-  ]);
+  }, [clientName]);
 
-  const clientData: ClientData = {
-    name: 'Rajesh Gupta',
-    company: 'Tech Solution Pvt Ltd',
-    status: 'Active',
-    paymentStatus: 'Pending',
-    workStatus: 'Pending',
-    invoiceSentDate: '26 Oct 2024',
-    deadlineDate: '30 Nov 2024',
-    services: [
-      'Incorporation',
-      'Virtual CFO',
-      'Accounting',
-      'Tax Consult',
-      'GT Filing',
-      'HR/PRO'
-    ]
-  };
+  useEffect(() => {
+    fetchClientData();
+  }, [fetchClientData]);
 
-  const getStatusConfig = (status: WorkflowStage['status']): StatusConfig => {
-    switch (status) {
-      case 'completed':
-        return { bg: '#dcfce7', text: '#16a34a', label: 'COMPLETED', dotColor: '#16a34a' };
-      case 'in_progress':
-        return { bg: '#dbeafe', text: '#2563eb', label: 'IN PROGRESS', dotColor: '#2563eb' };
-      case 'pending':
-        return { bg: '#f3f4f6', text: '#6b7280', label: 'PENDING', dotColor: '#d1d5db' };
-      case 'cancelled':
-        return { bg: '#fee2e2', text: '#dc2626', label: 'CANCELLED', dotColor: '#dc2626' };
-      default:
-        return { bg: '#f3f4f6', text: '#6b7280', label: 'PENDING', dotColor: '#d1d5db' };
-    }
-  };
+  const onRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    fetchClientData();
+  }, [fetchClientData]);
 
-  const handleStatusChange = (stageId: number, newStatus: WorkflowStage['status']): void => {
-    setWorkflowStages(prev =>
-      prev.map(stage =>
-        stage.id === stageId ? { ...stage, status: newStatus } : stage
-      )
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.centerState]}>
+        <ActivityIndicator size="large" color="#000" />
+        <Text style={styles.stateText}>Loading client data...</Text>
+      </View>
     );
-  };
+  }
 
-  const toggleExpand = (index: number): void => {
-    setExpandedStage(expandedStage === index ? -1 : index);
-  };
+  if (error) {
+    return (
+      <View style={[styles.container, styles.centerState]}>
+        <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
+        <Text style={styles.stateText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={fetchClientData}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const pendingAmount = totalBilled - totalCollected;
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
+    >
       {/* Header */}
       <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={24} color="#3b82f6" />
+        </TouchableOpacity>
         <View style={styles.avatar}>
-          <User size={40} color="#3b82f6" />
+          <Text style={styles.avatarText}>{clientName?.charAt(0)?.toUpperCase() || 'C'}</Text>
         </View>
-        <Text style={styles.name}>{clientData.name}</Text>
-        <Text style={styles.company}>{clientData.company}</Text>
+        <Text style={styles.name}>{clientName}</Text>
         <View style={styles.statusBadge}>
-          <Text style={styles.statusText}>{clientData.status}</Text>
+          <Text style={styles.statusText}>Client</Text>
         </View>
       </View>
 
       <View style={styles.content}>
-        {/* Client Details Card */}
+        {/* Financial Summary Card */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Client Details</Text>
-          
-          <View style={styles.detailsGrid}>
-            <View style={styles.detailItem}>
-              <View style={styles.detailIconContainer}>
-                <DollarSign size={18} color="#6b7280" />
-              </View>
-              <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>Payment Status</Text>
-                <Text style={[styles.detailValue, styles.pendingText]}>
-                  {clientData.paymentStatus}
-                </Text>
-              </View>
+          <Text style={styles.cardTitle}>Financial Summary</Text>
+          <View style={styles.financialGrid}>
+            <View style={styles.financialItem}>
+              <Text style={styles.financialLabel}>Total Billed</Text>
+              <Text style={styles.financialValue}>{formatINR(totalBilled)}</Text>
             </View>
-
-            <View style={styles.detailItem}>
-              <View style={styles.detailIconContainer}>
-                <Clock size={18} color="#6b7280" />
-              </View>
-              <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>Work Status</Text>
-                <Text style={[styles.detailValue, styles.pendingText]}>
-                  {clientData.workStatus}
-                </Text>
-              </View>
+            <View style={styles.financialItem}>
+              <Text style={styles.financialLabel}>Collected</Text>
+              <Text style={[styles.financialValue, { color: '#16a34a' }]}>
+                {formatINR(totalCollected)}
+              </Text>
             </View>
-
-            <View style={styles.detailItem}>
-              <View style={styles.detailIconContainer}>
-                <FileText size={18} color="#6b7280" />
-              </View>
-              <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>Invoice Sent Date</Text>
-                <Text style={styles.detailValue}>{clientData.invoiceSentDate}</Text>
-              </View>
+            <View style={styles.financialItem}>
+              <Text style={styles.financialLabel}>Pending</Text>
+              <Text style={[styles.financialValue, { color: '#dc2626' }]}>
+                {formatINR(pendingAmount)}
+              </Text>
             </View>
+            <View style={styles.financialItem}>
+              <Text style={styles.financialLabel}>Realisation</Text>
+              <Text style={[styles.financialValue, {
+                color: realisationRate >= 80 ? '#16a34a' : realisationRate >= 50 ? '#d97706' : '#dc2626'
+              }]}>
+                {realisationRate.toFixed(1)}%
+              </Text>
+            </View>
+          </View>
 
-            <View style={styles.detailItem}>
-              <View style={styles.detailIconContainer}>
-                <Calendar size={18} color="#6b7280" />
-              </View>
-              <View style={styles.detailContent}>
-                <Text style={styles.detailLabel}>Deadline Date</Text>
-                <Text style={styles.detailValue}>{clientData.deadlineDate}</Text>
-              </View>
+          {/* Realisation Progress Bar */}
+          <View style={styles.progressBarBg}>
+            <View style={[styles.progressBarFill, {
+              width: `${Math.min(realisationRate, 100)}%`,
+              backgroundColor: realisationRate >= 80 ? '#16a34a'
+                : realisationRate >= 50 ? '#d97706' : '#dc2626',
+            }]} />
+          </View>
+        </View>
+
+        {/* Invoice Summary Chips */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Invoice Summary</Text>
+          <View style={styles.chipRow}>
+            <View style={[styles.summaryChip, { backgroundColor: '#f0f0f0' }]}>
+              <Text style={styles.chipLabel}>Total</Text>
+              <Text style={styles.chipValue}>{summary.totalInvoices}</Text>
+            </View>
+            <View style={[styles.summaryChip, { backgroundColor: '#dcfce7' }]}>
+              <Text style={styles.chipLabel}>Paid</Text>
+              <Text style={[styles.chipValue, { color: '#16a34a' }]}>{summary.paidCount}</Text>
+            </View>
+            <View style={[styles.summaryChip, { backgroundColor: '#fef3c7' }]}>
+              <Text style={styles.chipLabel}>Partial</Text>
+              <Text style={[styles.chipValue, { color: '#d97706' }]}>{summary.partialCount}</Text>
+            </View>
+            <View style={[styles.summaryChip, { backgroundColor: '#fee2e2' }]}>
+              <Text style={styles.chipLabel}>Unpaid</Text>
+              <Text style={[styles.chipValue, { color: '#dc2626' }]}>{summary.unpaidCount}</Text>
             </View>
           </View>
         </View>
 
-        {/* Opted Services Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Opted Services</Text>
-          <View style={styles.servicesContainer}>
-            {clientData.services.map((service, index) => (
-              <View key={index} style={styles.serviceChip}>
-                <Text style={styles.serviceText}>{service}</Text>
+        {/* Outstanding Receivables */}
+        {receivables.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Outstanding Receivables</Text>
+            {receivables.map((bill, index) => (
+              <View key={`${bill.billRef}-${index}`} style={styles.receivableItem}>
+                <View style={styles.receivableHeader}>
+                  <Text style={styles.receivableRef}>{bill.billRef || '-'}</Text>
+                  {bill.isOverdue && (
+                    <View style={styles.overdueBadge}>
+                      <Text style={styles.overdueText}>{bill.daysOverdue}d overdue</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.receivableRow}>
+                  <Text style={styles.receivableLabel}>Amount: {formatINR(parseFloat(bill.billAmount) || 0)}</Text>
+                  <Text style={[styles.receivableLabel, { color: '#dc2626' }]}>
+                    Pending: {formatINR(parseFloat(bill.pendingAmount) || 0)}
+                  </Text>
+                </View>
+                <Text style={styles.receivableDate}>
+                  Due: {bill.dueDateFormatted || formatDate(bill.dueDate)} • Bucket: {bill.ageingBucket}
+                </Text>
               </View>
             ))}
           </View>
-        </View>
+        )}
 
-        {/* Workflow Progress Card */}
+        {/* Invoices List */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Workflow Progress</Text>
-          
-          <View style={styles.workflowContainer}>
-            {workflowStages.map((stage, index) => {
-              const config = getStatusConfig(stage.status);
-              const Icon = stage.icon;
-              const isExpanded = expandedStage === index;
-              
+          <Text style={styles.cardTitle}>All Invoices ({invoices.length})</Text>
+          {invoices.length === 0 ? (
+            <Text style={styles.emptyText}>No invoices found for this client</Text>
+          ) : (
+            invoices.map((inv, index) => {
+              const statusColor = getStatusColor(inv.paymentStatus);
               return (
-                <View key={stage.id} style={styles.workflowStage}>
-                  {/* Timeline Dot */}
-                  <View style={styles.timelineContainer}>
-                    <View style={[styles.timelineDot, { backgroundColor: config.dotColor }]} />
-                    {index < workflowStages.length - 1 && (
-                      <View style={styles.timelineLine} />
-                    )}
+                <View key={`${inv.voucherNumber}-${index}`} style={styles.invoiceItem}>
+                  <View style={styles.invoiceHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.invoiceNumber}>{inv.voucherNumber}</Text>
+                      <Text style={styles.invoiceDate}>{formatDate(inv.date)}</Text>
+                    </View>
+                    <View style={[styles.invoiceStatusBadge, { backgroundColor: statusColor.bg }]}>
+                      <Text style={[styles.invoiceStatusText, { color: statusColor.text }]}>
+                        {inv.paymentStatus}
+                      </Text>
+                    </View>
                   </View>
-
-                  {/* Stage Card */}
-                  <View style={styles.stageCard}>
-                    <TouchableOpacity 
-                      style={styles.stageHeader}
-                      onPress={() => toggleExpand(index)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.stageLeft}>
-                        <View style={styles.stageIcon}>
-                          <Icon size={24} color="#374151" />
-                        </View>
-                        <View style={styles.stageInfo}>
-                          <Text style={styles.stageName}>{stage.name}</Text>
-                          <View style={[styles.statusPickerContainer, { backgroundColor: config.bg }]}>
-                            <Picker
-                              selectedValue={stage.status}
-                              onValueChange={(itemValue) => handleStatusChange(stage.id, itemValue as WorkflowStage['status'])}
-                              style={styles.statusPicker}
-                              dropdownIconColor={config.text}
-                            >
-                              <Picker.Item label="PENDING" value="pending" />
-                              <Picker.Item label="IN PROGRESS" value="in_progress" />
-                              <Picker.Item label="COMPLETED" value="completed" />
-                              <Picker.Item label="CANCELLED" value="cancelled" />
-                            </Picker>
-                          </View>
-                        </View>
-                      </View>
-                      <View style={styles.expandIcon}>
-                        {isExpanded ? <ChevronUp size={20} color="#6b7280" /> : <ChevronDown size={20} color="#6b7280" />}
-                      </View>
-                    </TouchableOpacity>
-
-                    {isExpanded && (
-                      <View style={styles.stageDetails}>
-                        <Text style={styles.stageDescription}>{stage.description}</Text>
-                        
-                        <View style={styles.tasksSection}>
-                          <Text style={styles.tasksTitle}>TASKS</Text>
-                          {stage.tasks.map(task => (
-                            <View key={task.id} style={styles.taskItem}>
-                              <View style={[
-                                styles.taskCheckbox,
-                                { backgroundColor: task.completed ? '#16a34a' : '#e5e7eb' }
-                              ]}>
-                                {task.completed && <Check size={14} color="white" />}
-                              </View>
-                              <Text style={[
-                                styles.taskName,
-                                { 
-                                  textDecorationLine: task.completed ? 'line-through' : 'none',
-                                  color: task.completed ? '#9ca3af' : '#374151'
-                                }
-                              ]}>
-                                {task.name}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      </View>
-                    )}
+                  {inv.narration ? (
+                    <Text style={styles.invoiceNarration} numberOfLines={1}>{inv.narration}</Text>
+                  ) : null}
+                  <View style={styles.invoiceAmounts}>
+                    <Text style={styles.invoiceAmount}>
+                      Amount: {formatINR(parseFloat(inv.grossAmount) || 0)}
+                    </Text>
+                    <Text style={[styles.invoiceAmount, { color: '#16a34a' }]}>
+                      Collected: {formatINR(inv.amountCollected || 0)}
+                    </Text>
                   </View>
                 </View>
               );
-            })}
-          </View>
+            })
+          )}
         </View>
       </View>
+
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f3f4f6',
+  },
+  centerState: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stateText: {
+    fontSize: 15,
+    color: '#999',
+    marginTop: 12,
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: '#000',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
   },
   header: {
     backgroundColor: '#ffffff',
@@ -302,6 +342,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+  },
+  backBtn: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    zIndex: 10,
+    padding: 4,
   },
   avatar: {
     width: 80,
@@ -312,16 +359,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 16,
   },
+  avatarText: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#3b82f6',
+  },
   name: {
     fontSize: 22,
     fontWeight: '700',
     color: '#111827',
-    marginBottom: 4,
-  },
-  company: {
-    fontSize: 15,
-    color: '#6b7280',
-    marginBottom: 12,
+    marginBottom: 8,
+    textAlign: 'center',
   },
   statusBadge: {
     backgroundColor: '#dcfce7',
@@ -355,167 +403,151 @@ const styles = StyleSheet.create({
     color: '#111827',
     marginBottom: 16,
   },
-  detailsGrid: {
-    gap: 16,
-  },
-  detailItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  detailIconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: '#f9fafb',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  detailContent: {
-    flex: 1,
-  },
-  detailLabel: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginBottom: 2,
-  },
-  detailValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  pendingText: {
-    color: '#f59e0b',
-  },
-  servicesContainer: {
+  financialGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-  },
-  serviceChip: {
-    backgroundColor: '#f3f4f6',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  serviceText: {
-    fontSize: 14,
-    color: '#374151',
-    fontWeight: '500',
-  },
-  workflowContainer: {
-    position: 'relative',
-  },
-  workflowStage: {
-    flexDirection: 'row',
-    gap: 16,
+    gap: 12,
     marginBottom: 16,
   },
-  timelineContainer: {
-    alignItems: 'center',
-    paddingTop: 8,
-  },
-  timelineDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  timelineLine: {
-    width: 2,
-    flex: 1,
-    backgroundColor: '#e5e7eb',
-    minHeight: 60,
-    marginTop: 8,
-  },
-  stageCard: {
-    flex: 1,
+  financialItem: {
+    width: '46%',
     backgroundColor: '#f9fafb',
-    borderRadius: 12,
+    borderRadius: 10,
+    padding: 12,
+    alignItems: 'center',
+  },
+  financialLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  financialValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  progressBarBg: {
+    height: 8,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
     overflow: 'hidden',
   },
-  stageHeader: {
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  summaryChip: {
+    flex: 1,
+    borderRadius: 10,
+    padding: 10,
+    alignItems: 'center',
+  },
+  chipLabel: {
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '500',
+  },
+  chipValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    marginTop: 2,
+  },
+  receivableItem: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: '#dc2626',
+  },
+  receivableHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    marginBottom: 6,
   },
-  stageLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  stageIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stageInfo: {
-    flex: 1,
-  },
-  stageName: {
-    fontSize: 16,
+  receivableRef: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#111827',
-    marginBottom: 8,
+    color: '#111',
   },
-  statusPickerContainer: {
+  overdueBadge: {
+    backgroundColor: '#fecaca',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 6,
-    overflow: 'hidden',
-    height: 28,
-    justifyContent: 'center',
   },
-  statusPicker: {
-    height: 28,
-    fontSize: 12,
+  overdueText: {
+    fontSize: 11,
     fontWeight: '600',
+    color: '#991b1b',
   },
-  expandIcon: {
-    marginLeft: 8,
-  },
-  stageDetails: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    paddingLeft: 76,
-  },
-  stageDescription: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginBottom: 16,
-    lineHeight: 21,
-  },
-  tasksSection: {
-    marginTop: 16,
-  },
-  tasksTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#9ca3af',
-    marginBottom: 12,
-    letterSpacing: 0.5,
-  },
-  taskItem: {
+  receivableRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
+    justifyContent: 'space-between',
+    marginBottom: 4,
   },
-  taskCheckbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
+  receivableLabel: {
+    fontSize: 13,
+    color: '#666',
   },
-  taskName: {
+  receivableDate: {
+    fontSize: 12,
+    color: '#999',
+  },
+  invoiceItem: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    paddingVertical: 12,
+  },
+  invoiceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  invoiceNumber: {
     fontSize: 14,
+    fontWeight: '600',
+    color: '#111',
+  },
+  invoiceDate: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 2,
+  },
+  invoiceStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  invoiceStatusText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  invoiceNarration: {
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 6,
+  },
+  invoiceAmounts: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  invoiceAmount: {
+    fontSize: 13,
+    color: '#333',
     fontWeight: '500',
   },
+  emptyText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
 });
-
-export default ClientProfileScreen;
