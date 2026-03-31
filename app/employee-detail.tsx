@@ -1,7 +1,10 @@
 import { Picker } from '@react-native-picker/picker';
 import { Building, Calendar, Check, ChevronDown, ChevronUp, Clock, CreditCard, FileCheck, FileText, Plus, User } from 'lucide-react-native';
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
+import { getTasks, createTask, updateTaskStatus } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
 
 interface Task {
   id: number;
@@ -39,66 +42,60 @@ interface EmployeeData {
 }
 
 const EmployeeProfileScreen: React.FC = () => {
-  const [expandedStage, setExpandedStage] = useState<number>(-1);
+  const params = useLocalSearchParams();
+  const employeeId = params.id as string;
+  const { user } = useAuth();
+  
+  const [expandedStage, setExpandedStage] = useState<string>('');
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskDesc, setNewTaskDesc] = useState('');
+  const [newTaskStatus, setNewTaskStatus] = useState('pending');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([
-    {
-      id: 1,
-      name: 'Client Onboarding',
-      icon: Building,
-      status: 'completed',
-      description: 'Complete new client registration and documentation.',
-      tasks: [
-        { id: 1, name: 'Collect Client Information', completed: true },
-        { id: 2, name: 'Verify Documents', completed: true }
-      ]
-    },
-    {
-      id: 2,
-      name: 'Tax Filing',
-      icon: FileCheck,
-      status: 'in_progress',
-      description: 'Process and file tax returns for assigned clients.',
-      tasks: [
-        { id: 1, name: 'Review Financial Statements', completed: true },
-        { id: 2, name: 'Submit GST Returns', completed: false }
-      ]
-    },
-    {
-      id: 3,
-      name: 'Compliance Check',
-      icon: CreditCard,
-      status: 'pending',
-      description: 'Ensure all regulatory compliance requirements are met.',
-      tasks: [
-        { id: 1, name: 'Annual Return Filing', completed: false },
-        { id: 2, name: 'License Renewal', completed: false }
-      ]
+  const fetchTasks = async () => {
+    try {
+      setIsLoading(true);
+      const res = await getTasks({ assignedTo: employeeId });
+      if (res && res.success) {
+        setTasks(res.data);
+      }
+    } catch (e) {
+      console.log('Error fetching tasks', e);
+    } finally {
+      setIsLoading(false);
     }
-  ]);
+  };
+
+  useEffect(() => {
+    if (employeeId) {
+      fetchTasks();
+    } else {
+      setIsLoading(false);
+    }
+  }, [employeeId]);
 
   const employeeData: EmployeeData = {
-    id: 'EMP001',
-    name: 'Priya Sharma',
-    role: 'Senior Accountant',
-    department: 'Finance & Accounts',
+    id: employeeId || 'EMP001',
+    name: params.name ? String(params.name) : 'Employee Profile',
+    role: 'Employee Role',
+    department: 'Department',
     status: 'Active',
     performanceStatus: 'Excellent',
     taskStatus: 'On Track',
-    joinedDate: '15 Jan 2022',
-    nextReviewDate: '15 Jan 2025',
-    // managingClient: 'Rahul',
+    joinedDate: 'Joined Date',
+    nextReviewDate: 'Review Date',
     specializations: [
-      'Tax Filing',
-      'GST Returns',
-      'Financial Audit',
-      'Payroll',
-      'Compliance',
-      'Bookkeeping'
+      'Task Execution',
+      'Reporting',
+      'General'
     ]
   };
 
-  const getStatusConfig = (status: WorkflowStage['status']): StatusConfig => {
+  const getStatusConfig = (status: string): StatusConfig => {
     switch (status) {
       case 'completed':
         return { bg: '#dcfce7', text: '#16a34a', label: 'COMPLETED', dotColor: '#16a34a' };
@@ -113,22 +110,50 @@ const EmployeeProfileScreen: React.FC = () => {
     }
   };
 
-  const handleStatusChange = (stageId: number, newStatus: WorkflowStage['status']): void => {
-    setWorkflowStages(prev =>
-      prev.map(stage =>
-        stage.id === stageId ? { ...stage, status: newStatus } : stage
-      )
-    );
+  const handleStatusChange = async (taskId: string, newStatus: string): Promise<void> => {
+    try {
+      const res = await updateTaskStatus(taskId, newStatus);
+      if (res.success) {
+        setTasks(prev => prev.map(t => t.id === taskId || t._id === taskId ? { ...t, status: newStatus } : t));
+      } else {
+        Alert.alert('Error', 'Failed to update status');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Failed to update status');
+    }
   };
 
-  const toggleExpand = (id: number): void => {
-    setExpandedStage(expandedStage === id ? -1 : id);
+  const toggleExpand = (id: string): void => {
+    setExpandedStage(expandedStage === id ? '' : id);
   };
 
-  const handleAssignTask = (): void => {
-    // Navigation logic would go here
-    console.log(`Navigating to assign task for employee: ${employeeData.id}`);
-    // router.push(`/assign-task?employeeId=${employeeData.id}&employeeName=${employeeData.name}`);
+  const handleCreateTask = async () => {
+    if (!newTaskTitle) {
+      Alert.alert('Error', 'Title is required');
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const res = await createTask({
+        title: newTaskTitle,
+        description: newTaskDesc,
+        status: newTaskStatus,
+        assignedTo: employeeId,
+      });
+      if (res.success) {
+        setShowTaskModal(false);
+        setNewTaskTitle('');
+        setNewTaskDesc('');
+        setNewTaskStatus('pending');
+        fetchTasks(); // Refresh tasks
+      } else {
+        Alert.alert('Error', res.message || 'Failed to create task');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Error creating task');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -217,19 +242,23 @@ const EmployeeProfileScreen: React.FC = () => {
         {/* Active Tasks Card */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>Active Tasks</Text>
+            <Text style={styles.cardTitle}>Employee Tasks</Text>
           </View>
 
           <View style={styles.workflowContainer}>
-            {workflowStages
-              .filter(stage => stage.status === 'in_progress' || stage.status === 'pending')
-              .map((stage, index, filteredArray) => {
-                const config = getStatusConfig(stage.status);
-                const Icon = stage.icon;
-                const isExpanded = expandedStage === stage.id;
+            {isLoading ? (
+              <ActivityIndicator size="large" color="#000000" />
+            ) : tasks.length === 0 ? (
+              <Text style={{ textAlign: 'center', color: '#666666', marginBottom: 20 }}>No tasks found for this employee.</Text>
+            ) : (
+              tasks.map((task, index, filteredArray) => {
+                const config = getStatusConfig(task.status);
+                const Icon = FileCheck;
+                const taskId = task.id || task._id;
+                const isExpanded = expandedStage === taskId;
 
                 return (
-                  <View key={stage.id} style={styles.workflowStage}>
+                  <View key={taskId} style={styles.workflowStage}>
                     {/* Timeline Dot */}
                     <View style={styles.timelineContainer}>
                       <View style={[styles.timelineDot, { backgroundColor: config.dotColor }]} />
@@ -242,7 +271,7 @@ const EmployeeProfileScreen: React.FC = () => {
                     <View style={styles.stageCard}>
                       <TouchableOpacity
                         style={styles.stageHeader}
-                        onPress={() => toggleExpand(stage.id)}
+                        onPress={() => toggleExpand(taskId)}
                         activeOpacity={0.7}
                       >
                         <View style={styles.stageLeft}>
@@ -250,11 +279,11 @@ const EmployeeProfileScreen: React.FC = () => {
                             <Icon size={24} color="#374151" />
                           </View>
                           <View style={styles.stageInfo}>
-                            <Text style={styles.stageName}>{stage.name}</Text>
+                            <Text style={styles.stageName}>{task.title}</Text>
                             <View style={[styles.statusPickerContainer, { backgroundColor: config.bg }]}>
                               <Picker
-                                selectedValue={stage.status}
-                                onValueChange={(itemValue) => handleStatusChange(stage.id, itemValue as WorkflowStage['status'])}
+                                selectedValue={task.status}
+                                onValueChange={(itemValue) => handleStatusChange(taskId, String(itemValue))}
                                 style={styles.statusPicker}
                                 dropdownIconColor={config.text}
                               >
@@ -273,49 +302,100 @@ const EmployeeProfileScreen: React.FC = () => {
 
                       {isExpanded && (
                         <View style={styles.stageDetails}>
-                          <Text style={styles.stageDescription}>{stage.description}</Text>
-
-                          <View style={styles.tasksSection}>
-                            <Text style={styles.tasksTitle}>TASKS</Text>
-                            {stage.tasks.map(task => (
-                              <View key={task.id} style={styles.taskItem}>
-                                <View style={[
-                                  styles.taskCheckbox,
-                                  { backgroundColor: task.completed ? '#16a34a' : '#e5e7eb' }
-                                ]}>
-                                  {task.completed && <Check size={14} color="white" />}
-                                </View>
-                                <Text style={[
-                                  styles.taskName,
-                                  {
-                                    textDecorationLine: task.completed ? 'line-through' : 'none',
-                                    color: task.completed ? '#9ca3af' : '#374151'
-                                  }
-                                ]}>
-                                  {task.name}
-                                </Text>
-                              </View>
-                            ))}
-                          </View>
+                          <Text style={styles.stageDescription}>
+                            {task.description || 'No description provided.'}
+                          </Text>
+                          {task.clientName && (
+                            <Text style={[styles.stageDescription, { fontWeight: '600' }]}>
+                              Client: {task.clientName}
+                            </Text>
+                          )}
                         </View>
                       )}
                     </View>
                   </View>
                 );
-              })}
+              })
+            )}
           </View>
 
-          {/* Assign Task Button */}
+          {/* Add Task Button (Visible to everyone handling the employee details) */}
           <TouchableOpacity
             style={styles.assignButton}
-            onPress={handleAssignTask}
+            onPress={() => setShowTaskModal(true)}
             activeOpacity={0.8}
           >
             <Plus size={22} color="#FFFFFF" />
-            <Text style={styles.assignButtonText}>Assign New Task</Text>
+            <Text style={styles.assignButtonText}>Log / Add Task</Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Task Creation Modal */}
+      <Modal
+        visible={showTaskModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowTaskModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Update Task Status</Text>
+            
+            <Text style={styles.modalLabel}>Title</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g. Reviewed Q3 Reports"
+              value={newTaskTitle}
+              onChangeText={setNewTaskTitle}
+            />
+
+            <Text style={styles.modalLabel}>Description</Text>
+            <TextInput
+              style={[styles.modalInput, { height: 80, textAlignVertical: 'top' }]}
+              placeholder="Detailed description..."
+              multiline
+              value={newTaskDesc}
+              onChangeText={setNewTaskDesc}
+            />
+
+            <Text style={styles.modalLabel}>Status</Text>
+            <View style={styles.modalPickerWrapper}>
+              <Picker
+                selectedValue={newTaskStatus}
+                onValueChange={(val) => setNewTaskStatus(val)}
+                style={styles.modalPicker}
+              >
+                <Picker.Item label="Pending" value="pending" />
+                <Picker.Item label="In Progress" value="in_progress" />
+                <Picker.Item label="Completed" value="completed" />
+                <Picker.Item label="Cancelled" value="cancelled" />
+              </Picker>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => setShowTaskModal(false)}
+                disabled={isSubmitting}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonSubmit]}
+                onPress={handleCreateTask}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalButtonSubmitText}>Save Task</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -578,6 +658,78 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    minHeight: 400,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#000000',
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 16,
+    backgroundColor: '#F9FAFB',
+  },
+  modalPickerWrapper: {
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: 8,
+    marginBottom: 24,
+    backgroundColor: '#F9FAFB',
+    overflow: 'hidden',
+  },
+  modalPicker: {
+    height: 50,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalButtonCancel: {
+    backgroundColor: '#F3F4F6',
+  },
+  modalButtonCancelText: {
+    color: '#374151',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  modalButtonSubmit: {
+    backgroundColor: '#000000',
+  },
+  modalButtonSubmitText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 

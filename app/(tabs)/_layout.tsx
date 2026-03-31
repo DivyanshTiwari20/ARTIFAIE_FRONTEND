@@ -2,12 +2,15 @@ import { useAuth } from '@/context/AuthContext';
 import { isEmployeeRole } from '@/lib/roles';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
+import { View } from 'react-native';
+import FloatingActionButton from '@/components/common/FloatingActionButton';
 
 export default function TabLayout() {
   const { user } = useAuth();
   const isEmployee = isEmployeeRole(user?.role);
 
   return (
+    <View style={{ flex: 1 }}>
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: '#007AFF',
@@ -56,5 +59,7 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    {!isEmployee && <FloatingActionButton />}
+    </View>
   );
 }

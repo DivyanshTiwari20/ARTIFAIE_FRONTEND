@@ -2,6 +2,8 @@ import NotificationCard from '@/components/notification/NotificationCard';
 import { normalizeNotificationsList } from '@/lib/notifications';
 import { getNotifications, markAllNotificationsRead, markNotificationRead } from '@/services/api';
 import { Notification, NotificationFilter } from '@/types';
+import { useAuth } from '@/context/AuthContext';
+import { isAdminOrManager } from '@/lib/roles';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -14,14 +16,18 @@ import {
 } from 'react-native';
 
 export default function NotificationPage() {
+  const { user } = useAuth();
+  const showModeToggle = isAdminOrManager(user?.role);
+  
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<NotificationFilter>('today');
+  const [mode, setMode] = useState<'task' | 'general'>('task');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fetchNotifications = useCallback(async () => {
     try {
-      const res = await getNotifications();
+      const res = await getNotifications(showModeToggle ? mode : undefined);
       if (res && res.success) {
         const raw = res.data;
         const list = Array.isArray(raw)
@@ -43,8 +49,9 @@ export default function NotificationPage() {
   }, []);
 
   useEffect(() => {
+    setIsLoading(true);
     fetchNotifications();
-  }, [fetchNotifications]);
+  }, [fetchNotifications, mode]);
 
   const onRefresh = useCallback(() => {
     setIsRefreshing(true);
@@ -162,6 +169,28 @@ export default function NotificationPage() {
           ))}
         </ScrollView>
       </View>
+
+      {/* Mode Toggle for Admin/Manager */}
+      {showModeToggle && (
+        <View style={styles.modeToggleContainer}>
+          <TouchableOpacity
+            style={[styles.modeTab, mode === 'task' && styles.modeTabActive]}
+            onPress={() => setMode('task')}
+          >
+            <Text style={[styles.modeTabText, mode === 'task' && styles.modeTabTextActive]}>
+              Task
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeTab, mode === 'general' && styles.modeTabActive]}
+            onPress={() => setMode('general')}
+          >
+            <Text style={[styles.modeTabText, mode === 'general' && styles.modeTabTextActive]}>
+              General
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Notifications List */}
       <ScrollView 
@@ -284,5 +313,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#CCCCCC',
     marginTop: 8,
+  },
+  modeToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F5F5F5',
+    marginHorizontal: 20,
+    marginTop: 16,
+    borderRadius: 8,
+    padding: 4,
+  },
+  modeTab: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  modeTabActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  modeTabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666666',
+  },
+  modeTabTextActive: {
+    color: '#000000',
+    fontWeight: '600',
   },
 });

@@ -265,9 +265,12 @@ export const getEmployees = async () => {
   return await apiFetch('/api/auth/users');
 };
 
-export const getTasks = async (status?: string) => {
-  const url = status && status !== 'All' ? `/api/tasks?status=${status}` : '/api/tasks';
-  return await apiFetch(url);
+export const getTasks = async (params: { status?: string, assignedTo?: string } = {}) => {
+  const query = new URLSearchParams();
+  if (params.status && params.status !== 'All') query.append('status', params.status);
+  if (params.assignedTo) query.append('assignedTo', params.assignedTo);
+  const qs = query.toString();
+  return await apiFetch(`/api/tasks${qs ? `?${qs}` : ''}`);
 };
 
 export const createTask = async (taskData: {
@@ -278,10 +281,26 @@ export const createTask = async (taskData: {
   assignedTo: string;
   clientName?: string;
   dueDate?: string;
+  status?: string;
 }) => {
   return await apiFetch('/api/tasks', {
     method: 'POST',
     body: JSON.stringify(taskData),
+  });
+};
+
+export const createClient = async (clientData: {
+  name: string;
+  phone?: string;
+  email?: string;
+  location?: string;
+  contactPerson?: string;
+  licenseNum?: string;
+  licenseExpire?: string;
+}) => {
+  return await apiFetch('/api/clients', {
+    method: 'POST',
+    body: JSON.stringify(clientData),
   });
 };
 
@@ -296,8 +315,11 @@ export const getTaskCounts = async () => {
   return await apiFetch('/api/tasks/user/counts');
 };
 
-export const getNotifications = async () => {
-  return await apiFetch('/api/notifications');
+export const getNotifications = async (mode?: 'task' | 'general') => {
+  const params = new URLSearchParams();
+  if (mode) params.append('mode', mode);
+  const qs = params.toString();
+  return await apiFetch(`/api/notifications${qs ? `?${qs}` : ''}`);
 };
 
 export const markNotificationRead = async (id: string) => {
