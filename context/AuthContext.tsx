@@ -78,6 +78,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const savedUser = await getSavedUser();
         if (savedUser) {
           setUser(savedUser);
+          
+          // Ensure Push token is picked up if it was refreshed between app launches
+          registerForPushNotificationsAsync();
         }
       } catch (error) {
         console.log('Failed to restore session:', error);
