@@ -1,16 +1,16 @@
-import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import React, { createContext, ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { User } from '../types';
 import { clearAuth, deleteAccountApi, getSavedUser, loginApi, saveUser, updatePushToken } from '../services/api';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import { Platform, AppState } from 'react-native';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
-    shouldSetBadge: false,
+    shouldSetBadge: true,
     shouldShowBanner: true,
     shouldShowList: true,
   }),
@@ -23,6 +23,8 @@ interface AuthContextType {
   deleteAccount: () => Promise<{ success: boolean; message?: string }>;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /** Incremented every time a push notification arrives — screens can react to this */
+  notificationRefreshKey: number;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -30,6 +32,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [notificationRefreshKey, setNotificationRefreshKey] = useState(0);
+  const notificationReceivedListener = useRef<Notifications.EventSubscription | null>(null);
+  const notificationResponseListener = useRef<Notifications.EventSubscription | null>(null);
 
   /** Register for push notifications — fully silent if it fails */
   const registerForPushNotificationsAsync = async () => {
@@ -40,10 +45,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           importance: Notifications.AndroidImportance.MAX,
           vibrationPattern: [0, 250, 250, 250],
           lightColor: '#FF231F7C',
+          sound: 'default', // explicit sound to ensure android rings
         });
       }
 
-      if (!Device.isDevice) return;
+      if (!Device.isDevice) {
+        console.log('Push notifications require a physical device');
+        return;
+      }
 
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -51,25 +60,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
-      if (finalStatus !== 'granted') return;
+      if (finalStatus !== 'granted') {
+        console.log('Push notification permission not granted');
+        return;
+      }
 
       const projectId =
         Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
-      if (!projectId) return;
+      if (!projectId) {
+        console.log('No EAS projectId found — cannot register push token');
+        return;
+      }
 
       const tokenInfo = await Notifications.getExpoPushTokenAsync({ projectId });
       const token = tokenInfo.data;
+      console.log('📲 Expo push token obtained:', token?.slice(0, 35) + '...');
       if (token) {
         // Fire-and-forget: don't let a 401 crash the app
-        updatePushToken(token).catch((e: any) =>
-          console.log('Push token save skipped:', e?.message ?? e)
-        );
+        updatePushToken(token)
+          .then(() => console.log('✅ Push token saved to server'))
+          .catch((e: any) =>
+            console.log('Push token save skipped:', e?.message ?? e)
+          );
       }
     } catch (e: any) {
       // Fully swallow — push is optional, never block the user
       console.log('Push registration skipped:', e?.message ?? e);
     }
   };
+
+  // Set up notification listeners
+  useEffect(() => {
+    // Listener for when a notification is RECEIVED while app is in foreground
+    notificationReceivedListener.current = Notifications.addNotificationReceivedListener(
+      (notification) => {
+        console.log('🔔 Notification received in foreground:', notification.request.content.title);
+        // Bump the refresh key so notification screens re-fetch
+        setNotificationRefreshKey((prev) => prev + 1);
+      }
+    );
+
+    // Listener for when user TAPS a notification (foreground or background)
+    notificationResponseListener.current = Notifications.addNotificationResponseReceivedListener(
+      (response) => {
+        console.log('👆 Notification tapped:', response.notification.request.content.title);
+        const data = response.notification.request.content.data;
+        // Bump refresh key
+        setNotificationRefreshKey((prev) => prev + 1);
+
+        // Navigate to relevant screen if there's a related task
+        // Navigation will be handled by consuming components via the refresh key
+      }
+    );
+
+    // Also re-register push token when app comes back from background
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        // Bump refresh to pick up any notifications that arrived while backgrounded
+        setNotificationRefreshKey((prev) => prev + 1);
+      }
+    });
+
+    return () => {
+      if (notificationReceivedListener.current) {
+        Notifications.removeNotificationSubscription(notificationReceivedListener.current);
+      }
+      if (notificationResponseListener.current) {
+        Notifications.removeNotificationSubscription(notificationResponseListener.current);
+      }
+      subscription.remove();
+    };
+  }, []);
 
   // On app start, check if we have a saved user session
   useEffect(() => {
@@ -148,7 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, login, logout, deleteAccount, isAuthenticated, isLoading }}
+      value={{ user, login, logout, deleteAccount, isAuthenticated, isLoading, notificationRefreshKey }}
     >
       {children}
     </AuthContext.Provider>

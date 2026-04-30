@@ -1,5 +1,6 @@
-import { dummyClients } from '@/data/dummpyData';
-import { createTask, getEmployees } from '@/services/api';
+import { formatNameWithPrefix } from '@/lib/namePrefix';
+import { normalizeRole } from '@/lib/roles';
+import { createTask, getClients, getEmployees } from '@/services/api';
 import { Priority } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -13,44 +14,75 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function CreateTask() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
-  const [showEmployeeDropdown, setShowEmployeeDropdown] = useState(false);
-  
+  const [showAssigneeTypeDropdown, setShowAssigneeTypeDropdown] = useState(false);
+  const [showAssigneeDropdown, setShowAssigneeDropdown] = useState(false);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isLoadingClients, setIsLoadingClients] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [deadline, setDeadline] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
   const [category, setCategory] = useState<string | null>(null);
+  const [otherCategory, setOtherCategory] = useState('');
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
-  const [selectedEmployee, setSelectedEmployee] = useState<any | null>(null);
+  const [assigneeType, setAssigneeType] = useState<'employee' | 'admin'>('employee');
+  const [selectedAssignee, setSelectedAssignee] = useState<any | null>(null);
   const [deadlineDate, setDeadlineDate] = useState(new Date());
-  
+
   const priorities: Priority[] = ['low', 'medium', 'high', 'urgent'];
-  const categories = ['Incorporation', 'HR', 'CFO', 'Legal', 'Compliance'];
-  
+  const categories = [
+    'Accounting',
+    'CFO',
+    'Income Tax / Corporation Tax',
+    'Visa',
+    'MISE Certificates',
+    'Market Survey',
+    'Meetings',
+    'VAT / CA / Company Incorporation',
+    'Others',
+  ];
+  const assigneeTypes: ('employee' | 'admin')[] = ['employee', 'admin'];
+
   const [employees, setEmployees] = useState<any[]>([]);
+  const [admins, setAdmins] = useState<any[]>([]);
+  const [dbClients, setDbClients] = useState<any[]>([]);
 
   useEffect(() => {
-    const fetchEmployeesData = async () => {
+    const fetchInitialData = async () => {
       try {
-        const res = await getEmployees();
-        if (res.success) {
-          setEmployees(res.data || []);
+        setIsLoadingClients(true);
+        const [employeesRes, clientsRes] = await Promise.all([getEmployees(), getClients()]);
+
+        if (employeesRes.success) {
+          const users = employeesRes.data || [];
+          setEmployees(users.filter((user: any) => normalizeRole(user?.role) === 'employee'));
+          setAdmins(users.filter((user: any) => normalizeRole(user?.role) === 'admin'));
+        }
+
+        if (clientsRes.success) {
+          setDbClients(clientsRes.data || []);
         }
       } catch (err) {
-        console.error('Failed to fetch employees', err);
+        console.error('Failed to fetch initial data', err);
+      } finally {
+        setIsLoadingClients(false);
       }
     };
-    fetchEmployeesData();
+
+    fetchInitialData();
   }, []);
 
   const getPriorityColor = (p: Priority) => {
@@ -67,37 +99,42 @@ export default function CreateTask() {
   };
 
   const handleCreateTask = async () => {
-    if (!title || !description || !deadline || !category || !selectedClient || !selectedEmployee) {
+    if (!title || !description || !deadline || !selectedAssignee) {
       Alert.alert('Error', 'Please fill all required fields');
+      return;
+    }
+
+    if (category === 'Others' && !otherCategory.trim()) {
+      Alert.alert('Error', 'Please enter a category name for Others');
       return;
     }
 
     try {
       setIsSubmitting(true);
-      
-      const clientName = dummyClients.find((c) => c.id === selectedClient)?.name;
-      
+
+      const finalCategory = category === 'Others' ? otherCategory.trim() : category || undefined;
+      const client = selectedClient
+        ? dbClients.find((c) => (c.id || c._id) === selectedClient)
+        : null;
+      const clientName = client?.name || undefined;
+
       const res = await createTask({
         title,
         description,
-        category,
+        category: finalCategory,
         priority,
-        assignedTo: selectedEmployee.id || selectedEmployee._id,
-        clientName: clientName || '',
+        assignedTo: selectedAssignee.id || selectedAssignee._id,
+        clientName,
         dueDate: new Date(deadlineDate).toISOString(),
       });
 
       if (res.success) {
-        Alert.alert(
-          'Success',
-          `Task "${title}" created successfully`,
-          [
-            {
-              text: 'OK',
-              onPress: () => router.back(),
-            },
-          ]
-        );
+        Alert.alert('Success', `Task "${title}" created successfully`, [
+          {
+            text: 'OK',
+            onPress: () => router.back(),
+          },
+        ]);
       } else {
         Alert.alert('Error', res.message || 'Failed to assign task');
       }
@@ -111,22 +148,27 @@ export default function CreateTask() {
   const handleDateChange = (event: any, date?: Date) => {
     setShowDatePicker(false);
     if (date) {
-      setSelectedDate(date);
+      setDeadlineDate(date);
       setDeadline(date.toISOString().split('T')[0]);
     }
   };
 
+  const selectedClientName = selectedClient
+    ? dbClients.find((c) => (c.id || c._id) === selectedClient)?.name
+    : null;
+  const assignees = assigneeType === 'employee' ? employees : admins;
+  const selectedAssigneeName = selectedAssignee ? formatNameWithPrefix(selectedAssignee.name, selectedAssignee.gender) : null;
+
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle}>Create New Task</Text>
         </View>
 
-        {/* Form */}
         <View style={styles.form}>
-          {/* Title */}
-          <View style={styles.inputGroup}>
+          {/* <View style={styles.inputGroup}>
             <Text style={styles.label}>
               Task Title <Text style={styles.required}>*</Text>
             </Text>
@@ -136,9 +178,166 @@ export default function CreateTask() {
               value={title}
               onChangeText={setTitle}
             />
+          </View> */}
+
+
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>
+              Task Assigned To <Text style={styles.required}>*</Text>
+            </Text>
+            <TouchableOpacity
+              style={styles.input}
+              onPress={() => setShowAssigneeTypeDropdown(!showAssigneeTypeDropdown)}
+            >
+              <Text style={styles.dateText}>{assigneeType.charAt(0).toUpperCase() + assigneeType.slice(1)}</Text>
+              <Ionicons name="chevron-down" size={20} color="#666666" />
+            </TouchableOpacity>
+            {showAssigneeTypeDropdown && (
+              <View style={styles.dropdown}>
+                {assigneeTypes.map((type) => (
+                  <TouchableOpacity
+                    key={type}
+                    style={styles.dropdownItem}
+                    onPress={() => {
+                      setAssigneeType(type);
+                      setSelectedAssignee(null);
+                      setShowAssigneeTypeDropdown(false);
+                      setShowAssigneeDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownItemText}>{type.charAt(0).toUpperCase() + type.slice(1)}</Text>
+                    {assigneeType === type && <Ionicons name="checkmark" size={20} color="#000000" />}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
 
-          {/* Description */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>
+              {assigneeType.charAt(0).toUpperCase() + assigneeType.slice(1)} <Text style={styles.required}>*</Text>
+            </Text>
+            <TouchableOpacity
+              style={styles.input}
+              onPress={() => setShowAssigneeDropdown(!showAssigneeDropdown)}
+            >
+              <Text style={selectedAssignee ? styles.dateText : styles.placeholderText}>
+                {selectedAssigneeName || `Select ${assigneeType}`}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color="#666666" />
+            </TouchableOpacity>
+            {showAssigneeDropdown && (
+              <View style={styles.dropdown}>
+                <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                  {assignees.length === 0 && (
+                    <Text style={{ padding: 12, color: '#666666' }}>No {assigneeType}s available</Text>
+                  )}
+                  {assignees.map((assignee) => (
+                    <TouchableOpacity
+                      key={assignee.id || assignee._id}
+                      style={styles.dropdownItem}
+                      onPress={() => {
+                        setSelectedAssignee(assignee);
+                        setShowAssigneeDropdown(false);
+                      }}
+                    >
+                      <Text style={styles.dropdownItemText}>{formatNameWithPrefix(assignee.name, assignee.gender)}</Text>
+                      {selectedAssignee &&
+                        (selectedAssignee.id === assignee.id ||
+                          selectedAssignee._id === assignee._id) && (
+                          <Ionicons name="checkmark" size={20} color="#000000" />
+                        )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Category</Text>
+            <TouchableOpacity
+              style={styles.input}
+              onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
+            >
+              <Text style={category ? styles.dateText : styles.placeholderText}>
+                {category || 'Select category (optional)'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color="#666666" />
+            </TouchableOpacity>
+            {showCategoryDropdown && (
+              <View style={styles.dropdown}>
+                {categories.map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={styles.dropdownItem}
+                    onPress={() => {
+                      setCategory(cat);
+                      if (cat !== 'Others') {
+                        setOtherCategory('');
+                      }
+                      setShowCategoryDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.dropdownItemText}>{cat}</Text>
+                    {category === cat && <Ionicons name="checkmark" size={20} color="#000000" />}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            {category === 'Others' && (
+              <TextInput
+                style={[styles.input, { marginTop: 8 }]}
+                placeholder="Enter custom category"
+                value={otherCategory}
+                onChangeText={setOtherCategory}
+              />
+            )}
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Client</Text>
+            <TouchableOpacity
+              style={styles.input}
+              onPress={() => setShowClientDropdown(!showClientDropdown)}
+            >
+              <Text style={selectedClient ? styles.dateText : styles.placeholderText}>
+                {selectedClientName || (isLoadingClients ? 'Loading clients...' : 'Select client (optional)')}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color="#666666" />
+            </TouchableOpacity>
+            {showClientDropdown && (
+              <View style={styles.dropdown}>
+                <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                  {dbClients.length === 0 && !isLoadingClients && (
+                    <Text style={{ padding: 12, color: '#666666' }}>No clients available</Text>
+                  )}
+                  {dbClients.map((client) => {
+                    const id = client.id || client._id;
+                    return (
+                      <TouchableOpacity
+                        key={id}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setSelectedClient(id);
+                          setShowClientDropdown(false);
+                        }}
+                      >
+                        <View>
+                          <Text style={styles.dropdownItemText}>{client.name}</Text>
+                          <Text style={styles.dropdownItemSubtext}>
+                            {client.location || client.email || 'No details'}
+                          </Text>
+                        </View>
+                        {selectedClient === id && <Ionicons name="checkmark" size={20} color="#000000" />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+          </View>
           <View style={styles.inputGroup}>
             <Text style={styles.label}>
               Description <Text style={styles.required}>*</Text>
@@ -153,124 +352,6 @@ export default function CreateTask() {
               textAlignVertical="top"
             />
           </View>
-
-          {/* Employee Setup */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>
-              Employee <Text style={styles.required}>*</Text>
-            </Text>
-            <TouchableOpacity
-              style={styles.input}
-              onPress={() => setShowEmployeeDropdown(!showEmployeeDropdown)}
-            >
-              <Text style={selectedEmployee ? styles.dateText : styles.placeholderText}>
-                {selectedEmployee ? selectedEmployee.name : 'Select employee'}
-              </Text>
-              <Ionicons name="chevron-down" size={20} color="#666666" />
-            </TouchableOpacity>
-            {showEmployeeDropdown && (
-              <View style={styles.dropdown}>
-                <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
-                  {employees.map((emp) => (
-                    <TouchableOpacity
-                      key={emp.id || emp._id}
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setSelectedEmployee(emp);
-                        setShowEmployeeDropdown(false);
-                      }}
-                    >
-                      <View>
-                        <Text style={styles.dropdownItemText}>{emp.name}</Text>
-                      </View>
-                      {selectedEmployee && (selectedEmployee.id === emp.id || selectedEmployee._id === emp._id) && (
-                        <Ionicons name="checkmark" size={20} color="#000000" />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-          </View>
-
-          {/* Category */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>
-              Category <Text style={styles.required}>*</Text>
-            </Text>
-            <TouchableOpacity
-              style={styles.input}
-              onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
-            >
-              <Text style={category ? styles.dateText : styles.placeholderText}>
-                {category || 'Select category'}
-              </Text>
-              <Ionicons name="chevron-down" size={20} color="#666666" />
-            </TouchableOpacity>
-            {showCategoryDropdown && (
-              <View style={styles.dropdown}>
-                {categories.map((cat) => (
-                  <TouchableOpacity
-                    key={cat}
-                    style={styles.dropdownItem}
-                    onPress={() => {
-                      setCategory(cat);
-                      setShowCategoryDropdown(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownItemText}>{cat}</Text>
-                    {category === cat && (
-                      <Ionicons name="checkmark" size={20} color="#000000" />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-
-          {/* Client */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>
-              Client <Text style={styles.required}>*</Text>
-            </Text>
-            <TouchableOpacity
-              style={styles.input}
-              onPress={() => setShowClientDropdown(!showClientDropdown)}
-            >
-              <Text style={selectedClient ? styles.dateText : styles.placeholderText}>
-                {selectedClient 
-                  ? dummyClients.find(c => c.id === selectedClient)?.name 
-                  : 'Select client'}
-              </Text>
-              <Ionicons name="chevron-down" size={20} color="#666666" />
-            </TouchableOpacity>
-            {showClientDropdown && (
-              <View style={styles.dropdown}>
-                <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
-                  {dummyClients.map((client) => (
-                    <TouchableOpacity
-                      key={client.id}
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setSelectedClient(client.id);
-                        setShowClientDropdown(false);
-                      }}
-                    >
-                      <View>
-                        <Text style={styles.dropdownItemText}>{client.name}</Text>
-                        <Text style={styles.dropdownItemSubtext}>{client.company}</Text>
-                      </View>
-                      {selectedClient === client.id && (
-                        <Ionicons name="checkmark" size={20} color="#000000" />
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-          </View>
-
-          {/* Priority */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Priority</Text>
             <View style={styles.priorityContainer}>
@@ -280,17 +361,14 @@ export default function CreateTask() {
                   style={[
                     styles.priorityButton,
                     priority === p && {
-                      backgroundColor: getPriorityColor(p) + '20',
+                      backgroundColor: `${getPriorityColor(p)}20`,
                       borderColor: getPriorityColor(p),
                     },
                   ]}
                   onPress={() => setPriority(p)}
                 >
                   <Text
-                    style={[
-                      styles.priorityText,
-                      priority === p && { color: getPriorityColor(p) },
-                    ]}
+                    style={[styles.priorityText, priority === p && { color: getPriorityColor(p) }]}
                   >
                     {p.charAt(0).toUpperCase() + p.slice(1)}
                   </Text>
@@ -299,17 +377,13 @@ export default function CreateTask() {
             </View>
           </View>
 
-          {/* Deadline */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>
               Deadline <Text style={styles.required}>*</Text>
             </Text>
-            <TouchableOpacity
-              style={styles.input}
-              onPress={() => setShowDatePicker(true)}
-            >
+            <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
               <Text style={deadline ? styles.dateText : styles.placeholderText}>
-                {deadline ? deadline : 'Select deadline date'}
+                {deadline || 'Select deadline date'}
               </Text>
               <Ionicons name="calendar-outline" size={20} color="#666666" />
             </TouchableOpacity>
@@ -325,18 +399,16 @@ export default function CreateTask() {
           </View>
         </View>
 
-        {/* Assign Button */}
-        <TouchableOpacity 
-          style={[styles.assignButton, isSubmitting && { opacity: 0.7 }]} 
+        <TouchableOpacity
+          style={[styles.assignButton, { marginBottom: insets.bottom + 16 }, isSubmitting && { opacity: 0.7 }]}
           onPress={handleCreateTask}
           disabled={isSubmitting}
         >
           <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
-          <Text style={styles.assignButtonText}>
-            {isSubmitting ? 'Creating...' : 'Create Task'}
-          </Text>
+          <Text style={styles.assignButtonText}>{isSubmitting ? 'Creating...' : 'Create Task'}</Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -351,6 +423,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   headerTitle: {
+    marginTop: 30,
     fontSize: 24,
     fontWeight: 'bold',
     color: '#000000',
@@ -450,7 +523,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   dropdownScroll: {
-    maxHeight: 200,
+    maxHeight: 220,
   },
   dropdownItem: {
     flexDirection: 'row',
@@ -470,3 +543,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+
+
+
+
+

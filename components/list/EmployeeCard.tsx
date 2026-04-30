@@ -3,6 +3,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Employee } from '../../types';
 import Avatar from '../common/Avatar';
+import { formatNameWithPrefix } from '@/lib/namePrefix';
 
 interface EmployeeCardProps {
   employee: Employee;
@@ -25,9 +26,9 @@ export default function EmployeeCard({
       activeOpacity={0.7}
     >
       <View style={styles.header}>
-        <Avatar name={employee.name} size={50} />
+        <Avatar name={formatNameWithPrefix(employee.name as string, (employee as any).gender)} size={50} imageUri={employee.profileImageUrl || employee.avatar} />
         <View style={styles.info}>
-          <Text style={styles.name}>{employee.name}</Text>
+          <Text style={styles.name}>{formatNameWithPrefix(employee.name as string, (employee as any).gender)}</Text>
           <Text style={styles.department}>{employee.department}</Text>
           <View style={styles.statusContainer}>
             <View style={[
@@ -157,3 +158,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+

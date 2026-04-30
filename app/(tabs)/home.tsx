@@ -1,10 +1,22 @@
-import { dummyNotifications } from '@/data/dummpyData';
-import { getClientBilling, getBankPosition, getProfitLoss, getReceivables } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
+import { isAdminOrManager, isEmployeeRole, normalizeRole } from '@/lib/roles';
+import {
+  getBankPosition,
+  getClientBilling,
+  getProfitLoss,
+  getReceivables,
+  getTasks,
+  updateTaskStatus,
+  getClients,
+  getTaskCounts,
+} from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,172 +24,304 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import { DashboardSkeleton } from '@/components/common/Skeleton';
-import NotificationBadge from '../../components/common/NotificationBadge';
-import QuickNotificationModal from '../../components/notification/QuickNotificationModal';
-import { useAuth } from '../../context/AuthContext';
 
-// Helper to format Indian currency
 const formatINR = (amount: number): string => {
-  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`;
-  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
-  if (amount >= 1000) return `₹${(amount / 1000).toFixed(1)}K`;
-  return `₹${amount.toFixed(0)}`;
+  if (amount >= 10000000) return `\u20B9${(amount / 10000000).toFixed(1)}Cr`;
+  if (amount >= 100000) return `\u20B9${(amount / 100000).toFixed(1)}L`;
+  if (amount >= 1000) return `\u20B9${(amount / 1000).toFixed(1)}K`;
+  return `\u20B9${amount.toFixed(0)}`;
 };
 
 interface DashboardStats {
-  // From receivables
   totalOutstanding: number;
   overdueBills: number;
   totalBills: number;
   mtdCollections: number;
-  // From P&L
   totalRevenue: number;
   totalExpenses: number;
   netProfit: number;
   netProfitMargin: number;
   revenueChange: number;
-  // From bank position
   totalLiquidFunds: number;
   totalBankBalance: number;
   totalCashBalance: number;
-  // From client billing
   totalClients: number;
   paidInvoices: number;
   unpaidInvoices: number;
+  totalPendingTasks: number;
 }
 
-export default function Home() {
-  const { user } = useAuth();
-  const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [notifications, setNotifications] = useState(dummyNotifications);
-  const [showQuickNotifications, setShowQuickNotifications] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<DashboardStats>({
-    totalOutstanding: 0,
-    overdueBills: 0,
-    totalBills: 0,
-    mtdCollections: 0,
-    totalRevenue: 0,
-    totalExpenses: 0,
-    netProfit: 0,
-    netProfitMargin: 0,
-    revenueChange: 0,
-    totalLiquidFunds: 0,
-    totalBankBalance: 0,
-    totalCashBalance: 0,
-    totalClients: 0,
-    paidInvoices: 0,
-    unpaidInvoices: 0,
-  });
+const EMPTY_STATS: DashboardStats = {
+  totalOutstanding: 0,
+  overdueBills: 0,
+  totalBills: 0,
+  mtdCollections: 0,
+  totalRevenue: 0,
+  totalExpenses: 0,
+  netProfit: 0,
+  netProfitMargin: 0,
+  revenueChange: 0,
+  totalLiquidFunds: 0,
+  totalBankBalance: 0,
+  totalCashBalance: 0,
+  totalClients: 0,
+  paidInvoices: 0,
+  unpaidInvoices: 0,
+  totalPendingTasks: 0,
+};
 
-  const fetchDashboardData = useCallback(async () => {
+
+const HOME_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+let homeDashboardCache: { timestamp: number; data: DashboardStats } | null = null;
+let homeEmployeeTaskCache: { timestamp: number; data: any[] } | null = null;
+
+const statusBadge = (status: string) => {
+  switch (status) {
+    case 'completed':
+      return { bg: '#DCFCE7', color: '#166534', text: 'Completed' };
+    case 'in_progress':
+      return { bg: '#DBEAFE', color: '#1D4ED8', text: 'In Progress' };
+    case 'cancelled':
+      return { bg: '#FEE2E2', color: '#991B1B', text: 'Cancelled' };
+    default:
+      return { bg: '#F3F4F6', color: '#374151', text: 'Pending' };
+  }
+};
+
+const statusOptions: { label: string; value: string; icon: string; iconColor: string }[] = [
+  { label: 'Update Status', value: 'update_status', icon: 'create-outline', iconColor: '#2563EB' },
+  { label: 'Mark Completed', value: 'completed', icon: 'checkmark-circle-outline', iconColor: '#16A34A' },
+  { label: 'Mark Pending', value: 'pending', icon: 'time-outline', iconColor: '#6B7280' },
+  { label: 'Mark Cancelled', value: 'cancelled', icon: 'close-circle-outline', iconColor: '#DC2626' },
+];
+
+export default function Home() {
+  const { user, notificationRefreshKey } = useAuth();
+  const router = useRouter();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [stats, setStats] = useState<DashboardStats>(() => homeDashboardCache?.data || EMPTY_STATS);
+  const [employeeTasks, setEmployeeTasks] = useState<any[]>(() => homeEmployeeTaskCache?.data || []);
+  const [isLoading, setIsLoading] = useState(() => !homeDashboardCache && !homeEmployeeTaskCache);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isTaskSaving, setIsTaskSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Three-dots menu state
+  const [openMenuTaskId, setOpenMenuTaskId] = useState<string | null>(null);
+
+  // Status update modal state
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [editingTask, setEditingTask] = useState<any | null>(null);
+  const [updateSubTitle, setUpdateSubTitle] = useState('');
+  const [updateSubDescription, setUpdateSubDescription] = useState('');
+  const [updateStatus, setUpdateStatus] = useState<'pending' | 'in_progress' | 'completed' | 'cancelled'>('pending');
+
+  const isEmployee = isEmployeeRole(user?.role);
+  const isManager = user?.role?.toLowerCase() === 'manager';
+  const canSeeClientsDirectory = isAdminOrManager(user?.role);
+  const canSeeTasks = isEmployee || isManager;
+
+  const fetchDashboardData = useCallback(async (forceRefresh = false) => {
+    if (normalizeRole(user?.role) !== 'admin') {
+      setStats(EMPTY_STATS);
+      return;
+    }
+
+    const requestOptions = {
+      forceRefresh,
+      staleWhileRevalidate: !forceRefresh,
+    };
+
+    const [receivablesRes, plRes, bankRes, billingRes, clientsRes, taskCountsRes] = await Promise.allSettled([
+      getReceivables(undefined, undefined, requestOptions),
+      getProfitLoss(undefined, undefined, requestOptions),
+      getBankPosition(undefined, undefined, requestOptions),
+      getClientBilling(undefined, undefined, undefined, requestOptions),
+      getClients(requestOptions),
+      getTaskCounts(),
+    ]);
+
+    const nextStats: DashboardStats = { ...EMPTY_STATS };
+
+    if (receivablesRes.status === 'fulfilled' && receivablesRes.value.success) {
+      const data = receivablesRes.value.data;
+      nextStats.totalOutstanding = data?.summary?.totalOutstanding || 0;
+      nextStats.overdueBills = data?.summary?.overdueBills || 0;
+      nextStats.totalBills = data?.summary?.totalBills || 0;
+      nextStats.mtdCollections = data?.summary?.mtdCollections || 0;
+    }
+
+    if (plRes.status === 'fulfilled' && plRes.value.success) {
+      const derived = plRes.value.data?.derived;
+      nextStats.totalRevenue = derived?.totalRevenue || 0;
+      nextStats.totalExpenses = derived?.totalExpenses || 0;
+      nextStats.netProfit = derived?.netProfit || 0;
+      nextStats.netProfitMargin = derived?.netProfitMarginPercent || 0;
+      nextStats.revenueChange = derived?.revenueVsLastMonth?.changePercent || 0;
+    }
+
+    if (bankRes.status === 'fulfilled' && bankRes.value.success) {
+      const data = bankRes.value.data;
+      nextStats.totalLiquidFunds = data?.derived?.totalLiquidFunds || 0;
+      nextStats.totalBankBalance = data?.totalBankBalance || 0;
+      nextStats.totalCashBalance = data?.totalCashBalance || 0;
+    }
+
+    if (billingRes.status === 'fulfilled' && billingRes.value.success) {
+      const data = billingRes.value.data;
+      nextStats.paidInvoices = data?.summary?.paidCount || 0;
+      nextStats.unpaidInvoices = (data?.summary?.partialCount || 0) + (data?.summary?.unpaidCount || 0);
+    }
+    
+    if (clientsRes.status === 'fulfilled' && clientsRes.value.success) {
+      nextStats.totalClients = clientsRes.value.data?.length || 0;
+    }
+    
+    if (taskCountsRes.status === 'fulfilled' && taskCountsRes.value.success) {
+      const counts = taskCountsRes.value.data;
+      nextStats.totalPendingTasks = Number(counts?.pending || 0) + Number(counts?.in_progress || 0);
+    }
+
+    setStats(nextStats);
+    homeDashboardCache = { timestamp: Date.now(), data: nextStats };
+
+    const staleResponses = [receivablesRes, plRes, bankRes, billingRes].some(
+      (result) =>
+        result.status === 'fulfilled' &&
+        result.value?._cache?.source === 'local' &&
+        result.value?._cache?.stale
+    );
+
+    if (!forceRefresh && staleResponses) {
+      void fetchDashboardData(true);
+    }
+  }, [user?.role]);
+
+  const fetchEmployeeTasks = useCallback(async (forceRefresh = false) => {
+    if (!canSeeTasks) {
+      setEmployeeTasks([]);
+      return;
+    }
+
+    const response = await getTasks({}, { forceRefresh, staleWhileRevalidate: !forceRefresh });
+    if (response.success) {
+      const nextTasks = response.data || [];
+      setEmployeeTasks(nextTasks);
+      homeEmployeeTaskCache = { timestamp: Date.now(), data: nextTasks };
+    }
+  }, [canSeeTasks]);
+
+  const loadData = useCallback(async (forceRefresh = false) => {
     try {
       setError(null);
-
-      // Fetch all data in parallel
-      const [receivablesRes, plRes, bankRes, billingRes] = await Promise.allSettled([
-        getReceivables(),
-        getProfitLoss(),
-        getBankPosition(),
-        getClientBilling(),
-      ]);
-
-      const newStats: DashboardStats = { ...stats };
-
-      // Process Receivables
-      if (receivablesRes.status === 'fulfilled' && receivablesRes.value.success) {
-        const data = receivablesRes.value.data;
-        newStats.totalOutstanding = data?.summary?.totalOutstanding || 0;
-        newStats.overdueBills = data?.summary?.overdueBills || 0;
-        newStats.totalBills = data?.summary?.totalBills || 0;
-        newStats.mtdCollections = data?.summary?.mtdCollections || 0;
+      const hasCachedData = !!homeDashboardCache || !!homeEmployeeTaskCache;
+      if (!forceRefresh && !hasCachedData) {
+        setIsLoading(true);
       }
-
-      // Process Profit & Loss
-      if (plRes.status === 'fulfilled' && plRes.value.success) {
-        const derived = plRes.value.data?.derived;
-        if (derived) {
-          newStats.totalRevenue = derived.totalRevenue || 0;
-          newStats.totalExpenses = derived.totalExpenses || 0;
-          newStats.netProfit = derived.netProfit || 0;
-          newStats.netProfitMargin = derived.netProfitMarginPercent || 0;
-          newStats.revenueChange = derived.revenueVsLastMonth?.changePercent || 0;
-        }
-      }
-
-      // Process Bank Position
-      if (bankRes.status === 'fulfilled' && bankRes.value.success) {
-        const data = bankRes.value.data;
-        newStats.totalLiquidFunds = data?.derived?.totalLiquidFunds || 0;
-        newStats.totalBankBalance = data?.totalBankBalance || 0;
-        newStats.totalCashBalance = data?.totalCashBalance || 0;
-      }
-
-      // Process Client Billing
-      if (billingRes.status === 'fulfilled' && billingRes.value.success) {
-        const data = billingRes.value.data;
-        const clientRates = data?.clientRealisationRates || [];
-        newStats.totalClients = clientRates.length;
-        newStats.paidInvoices = data?.summary?.paidCount || 0;
-        newStats.unpaidInvoices = (data?.summary?.partialCount || 0) + (data?.summary?.unpaidCount || 0);
-      }
-
-      setStats(newStats);
+      await Promise.all([fetchDashboardData(forceRefresh), fetchEmployeeTasks(forceRefresh)]);
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard data');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [fetchDashboardData, fetchEmployeeTasks]);
 
   useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+    loadData(false);
+    const intervalId = setInterval(() => {
+      loadData(true);
+    }, HOME_REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(intervalId);
+  }, [loadData]);
 
   const onRefresh = useCallback(() => {
     setIsRefreshing(true);
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+    loadData(true);
+  }, [loadData]);
 
-  const getLast24HoursNotifications = () => {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    if (!Array.isArray(notifications)) return [];
-    return notifications.filter((n) => {
-      if (!n || !n.createdAt) return false;
-      const date = new Date(n.createdAt);
-      return !isNaN(date.getTime()) && date > twentyFourHoursAgo;
+  // Auto-refresh when a push notification arrives (via AuthContext)
+  useEffect(() => {
+    if (notificationRefreshKey > 0) {
+      loadData(true);
+    }
+  }, [notificationRefreshKey]);
+
+  const filteredEmployeeTasks = useMemo(() => {
+    if (!searchQuery.trim()) return employeeTasks;
+    const q = searchQuery.toLowerCase();
+    return employeeTasks.filter((task) => {
+      const title = (task.title || '').toLowerCase();
+      const description = (task.description || '').toLowerCase();
+      return title.includes(q) || description.includes(q);
     });
+  }, [employeeTasks, searchQuery]);
+
+  const handleQuickStatusUpdate = async (taskId: string, status: string) => {
+    try {
+      setOpenMenuTaskId(null);
+      await updateTaskStatus(taskId, status);
+      setEmployeeTasks((prev) => prev.map((t) => ((t.id || t._id) === taskId ? { ...t, status } : t)));
+    } catch (err: any) {
+      Alert.alert('Update failed', err.message || 'Could not update task status');
+    }
   };
 
-  const getUnreadCount = () => {
-    return getLast24HoursNotifications().filter((n) => !n.isRead).length;
+  const openStatusUpdateModal = (task: any) => {
+    setOpenMenuTaskId(null);
+    setEditingTask(task);
+    setUpdateSubTitle('');
+    setUpdateSubDescription('');
+    setUpdateStatus(task.status || 'pending');
+    setShowUpdateModal(true);
   };
 
-  const handleNotificationPress = (id: string) => {
-    setNotifications(notifications.map(n =>
-      n.id === id ? { ...n, isRead: true } : n
-    ));
+  const saveStatusUpdate = async () => {
+    if (!editingTask) return;
+    if (!updateSubTitle.trim()) {
+      Alert.alert('Validation', 'Please enter what you are working on');
+      return;
+    }
+
+    try {
+      setIsTaskSaving(true);
+      const taskId = editingTask.id || editingTask._id;
+
+      const response = await updateTaskStatus(taskId, updateStatus, updateSubTitle.trim(), updateSubDescription.trim() || undefined);
+
+      if (!response.success) {
+        Alert.alert('Update failed', response.message || 'Could not update task status');
+        return;
+      }
+
+      setShowUpdateModal(false);
+      setEditingTask(null);
+      await fetchEmployeeTasks();
+    } catch (err: any) {
+      Alert.alert('Update failed', err.message || 'Could not update task');
+    } finally {
+      setIsTaskSaving(false);
+    }
+  };
+
+  const toggleMenu = (taskId: string) => {
+    setOpenMenuTaskId((prev) => (prev === taskId ? null : taskId));
   };
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <View>
-            <Text style={styles.greetingText}>Hi {user?.name || 'User'} 👋</Text>
-            <Text style={styles.dashboardTitle}>Dashboard</Text>
+            <Text style={styles.greetingText}>Hi {user?.name || 'User'}</Text>
+            <Text style={styles.dashboardTitle}>{isEmployee ? 'My Workboard' : 'Dashboard'}</Text>
           </View>
-          <TouchableOpacity
-            style={styles.notificationIconTop}
-            onPress={() => router.push('/settings' as any)}
-          >
+          <TouchableOpacity style={styles.notificationIconTop} onPress={() => router.push('/settings' as any)}>
             <Ionicons name="settings-outline" size={28} color="#000000" />
           </TouchableOpacity>
         </View>
@@ -186,7 +330,7 @@ export default function Home() {
           <Ionicons name="search" size={20} color="#666666" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search here"
+            placeholder={isEmployee ? 'Search your tasks' : 'Search here'}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
@@ -196,13 +340,9 @@ export default function Home() {
       <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
       >
-        {isLoading ? (
-          <DashboardSkeleton />
-        ) : error ? (
+        {error && !homeDashboardCache && !homeEmployeeTaskCache ? (
           <View style={styles.errorContainer}>
             <Ionicons name="cloud-offline-outline" size={48} color="#FF3B30" />
             <Text style={styles.errorTitle}>Failed to load data</Text>
@@ -213,103 +353,115 @@ export default function Home() {
           </View>
         ) : (
           <>
-            {/* Financial Overview Row */}
-            {user?.role === 'admin' && (
+            {isLoading && (
+              <View style={styles.inlineLoadingRow}>
+                <ActivityIndicator size="small" color="#111827" />
+                <Text style={styles.inlineLoadingText}>Updating latest data...</Text>
+              </View>
+            )}
+            {error && (
+              <View style={styles.cachedInfoBanner}>
+                <Ionicons name="cloud-offline-outline" size={14} color="#B45309" />
+                <Text style={styles.cachedInfoText}>Live refresh failed. Showing cached data.</Text>
+              </View>
+            )}
+            {normalizeRole(user?.role) === 'admin' && (
               <>
                 <View style={styles.overviewCard}>
-              <View style={styles.overviewHeader}>
-                <Text style={styles.overviewTitle}>Financial Overview</Text>
-                <View style={[
-                  styles.changeBadge,
-                  { backgroundColor: stats.revenueChange >= 0 ? '#dcfce7' : '#fee2e2' }
-                ]}>
-                  <Ionicons
-                    name={stats.revenueChange >= 0 ? 'trending-up' : 'trending-down'}
-                    size={14}
-                    color={stats.revenueChange >= 0 ? '#16a34a' : '#dc2626'}
-                  />
-                  <Text style={[
-                    styles.changeText,
-                    { color: stats.revenueChange >= 0 ? '#16a34a' : '#dc2626' }
-                  ]}>
-                    {Math.abs(stats.revenueChange).toFixed(1)}% vs last month
-                  </Text>
+                  <View style={styles.overviewHeader}>
+                    <Text style={styles.overviewTitle}>Financial Overview</Text>
+                    <View
+                      style={[
+                        styles.changeBadge,
+                        { backgroundColor: stats.revenueChange >= 0 ? '#dcfce7' : '#fee2e2' },
+                      ]}
+                    >
+                      <Ionicons
+                        name={stats.revenueChange >= 0 ? 'trending-up' : 'trending-down'}
+                        size={14}
+                        color={stats.revenueChange >= 0 ? '#16a34a' : '#dc2626'}
+                      />
+                      <Text
+                        style={[
+                          styles.changeText,
+                          { color: stats.revenueChange >= 0 ? '#16a34a' : '#dc2626' },
+                        ]}
+                      >
+                        {Math.abs(stats.revenueChange).toFixed(1)}% vs last month
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.overviewRow}>
+                    <View style={styles.overviewItem}>
+                      <Text style={styles.overviewLabel}>Revenue</Text>
+                      <Text style={styles.overviewValue}>{formatINR(stats.totalRevenue)}</Text>
+                    </View>
+                    <View style={styles.overviewDivider} />
+                    <View style={styles.overviewItem}>
+                      <Text style={styles.overviewLabel}>Expenses</Text>
+                      <Text style={styles.overviewValue}>{formatINR(stats.totalExpenses)}</Text>
+                    </View>
+                    <View style={styles.overviewDivider} />
+                    <View style={styles.overviewItem}>
+                      <Text style={styles.overviewLabel}>Net Profit</Text>
+                      <Text
+                        style={[
+                          styles.overviewValue,
+                          { color: stats.netProfit >= 0 ? '#16a34a' : '#dc2626' },
+                        ]}
+                      >
+                        {formatINR(stats.netProfit)}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
-              </View>
-              <View style={styles.overviewRow}>
-                <View style={styles.overviewItem}>
-                  <Text style={styles.overviewLabel}>Revenue</Text>
-                  <Text style={styles.overviewValue}>{formatINR(stats.totalRevenue)}</Text>
-                </View>
-                <View style={styles.overviewDivider} />
-                <View style={styles.overviewItem}>
-                  <Text style={styles.overviewLabel}>Expenses</Text>
-                  <Text style={styles.overviewValue}>{formatINR(stats.totalExpenses)}</Text>
-                </View>
-                <View style={styles.overviewDivider} />
-                <View style={styles.overviewItem}>
-                  <Text style={styles.overviewLabel}>Net Profit</Text>
-                  <Text style={[styles.overviewValue, { color: stats.netProfit >= 0 ? '#16a34a' : '#dc2626' }]}>
-                    {formatINR(stats.netProfit)}
-                  </Text>
-                </View>
-              </View>
-            </View>
 
-            {/* Stats Grid */}
-            <View style={styles.statsGrid}>
-              <View style={[styles.statCard, { backgroundColor: '#A7F3D0' }]}>
-                <View style={styles.statHeader}>
-                  <Text style={styles.statTitleColor}>Liquid Funds</Text>
-                  <Ionicons name="wallet-outline" size={22} color="#000" />
-                </View>
-                <Text style={styles.statValueStyle}>{formatINR(stats.totalLiquidFunds)}</Text>
-                <Text style={styles.statSubtextStyle}>
-                  Bank: {formatINR(stats.totalBankBalance)} • Cash: {formatINR(stats.totalCashBalance)}
-                </Text>
-              </View>
+                <View style={styles.statsGrid}>
+                  <View style={[styles.statCard, { backgroundColor: '#A7F3D0' }]}>
+                    <View style={styles.statHeader}>
+                      <Text style={styles.statTitleColor}>Total Active Clients</Text>
+                      <Ionicons name="briefcase-outline" size={22} color="#000" />
+                    </View>
+                    <Text style={styles.statValueStyle}>{stats.totalClients}</Text>
+                    <Text style={styles.statSubtextStyle}>
+                      Active directory
+                    </Text>
+                  </View>
 
-              <View style={[styles.statCard, { backgroundColor: '#8ECAFF' }]}>
-                <View style={styles.statHeader}>
-                  <Text style={styles.statTitleColor}>Outstanding</Text>
-                  <Ionicons name="receipt-outline" size={22} color="#000" />
-                </View>
-                <Text style={styles.statValueStyle}>{formatINR(stats.totalOutstanding)}</Text>
-                <Text style={styles.statSubtextStyle}>{stats.overdueBills} overdue bills</Text>
-              </View>
+                  <View style={[styles.statCard, { backgroundColor: '#8ECAFF' }]}>
+                    <View style={styles.statHeader}>
+                      <Text style={styles.statTitleColor}>Outstanding</Text>
+                      <Ionicons name="receipt-outline" size={22} color="#000" />
+                    </View>
+                    <Text style={styles.statValueStyle}>{formatINR(stats.totalOutstanding)}</Text>
+                    <Text style={styles.statSubtextStyle}>{stats.overdueBills} overdue bills</Text>
+                  </View>
 
-              <View style={[styles.statCard, { backgroundColor: '#FDE46E' }]}>
-                <View style={styles.statHeader}>
-                  <Text style={styles.statTitleColor}>MTD Collections</Text>
-                  <Ionicons name="cash-outline" size={22} color="#000" />
-                </View>
-                <Text style={styles.statValueStyle}>{formatINR(stats.mtdCollections)}</Text>
-                <Text style={styles.statSubtextStyle}>This month received</Text>
-              </View>
+                  <View style={[styles.statCard, { backgroundColor: '#FDE46E' }]}>
+                    <View style={styles.statHeader}>
+                      <Text style={styles.statTitleColor}>Total Pending Tasks</Text>
+                      <Ionicons name="document-text-outline" size={22} color="#000" />
+                    </View>
+                    <Text style={styles.statValueStyle}>{stats.totalPendingTasks}</Text>
+                    <Text style={styles.statSubtextStyle}>Tasks to be completed</Text>
+                  </View>
 
-              <View style={[styles.statCard, { backgroundColor: '#FECACA' }]}>
-                <View style={styles.statHeader}>
-                  <Text style={styles.statTitleColor}>Profit Margin</Text>
-                  <Ionicons name="analytics-outline" size={22} color="#000" />
+                  <View style={[styles.statCard, { backgroundColor: '#FECACA' }]}>
+                    <View style={styles.statHeader}>
+                      <Text style={styles.statTitleColor}>Profit Margin</Text>
+                      <Ionicons name="analytics-outline" size={22} color="#000" />
+                    </View>
+                    <Text style={styles.statValueStyle}>{stats.netProfitMargin.toFixed(1)}%</Text>
+                    <Text style={styles.statSubtextStyle}>Net profit margin</Text>
+                  </View>
                 </View>
-                <Text style={styles.statValueStyle}>{stats.netProfitMargin.toFixed(1)}%</Text>
-                <Text style={styles.statSubtextStyle}>Net profit margin</Text>
-              </View>
-            </View>
-            </>
+              </>
             )}
 
-            {/* Directories Section */}
-            {user?.role !== 'employee' && (
-              <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Directories</Text>
-            )}
-            <View style={styles.directoryGrid}>
-              {/* Employee Card */}
-              {user?.role !== 'employee' && (
-                <TouchableOpacity
-                  style={styles.directoryCard}
-                  onPress={() => router.push('/list?tab=employees')}
-                >
+            {!isEmployee && <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Directories</Text>}
+            {!isEmployee && (
+              <View style={styles.directoryGrid}>
+                <TouchableOpacity style={styles.directoryCard} onPress={() => router.push('/list?tab=employees')}>
                   <View style={[styles.directoryIconContainer, { backgroundColor: '#E8E4F3' }]}>
                     <Ionicons name="people" size={24} color="#6B4EFF" />
                   </View>
@@ -319,51 +471,211 @@ export default function Home() {
                   </View>
                   <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
                 </TouchableOpacity>
-              )}
 
-              {/* Client Card */}
-              {user?.role === 'admin' && (
-                <>
-              <TouchableOpacity
-                style={styles.directoryCard}
-                onPress={() => router.push('/list?tab=clients')}
-              >
-                <View style={[styles.directoryIconContainer, { backgroundColor: '#E4F4E8' }]}>
-                  <Ionicons name="briefcase" size={24} color="#4CAF50" />
-                </View>
-                <View style={styles.directoryInfo}>
-                  <Text style={styles.directoryTitle}>Clients</Text>
-                  <Text style={styles.directoryStats}>
-                    {stats.totalClients > 0 ? `${stats.totalClients} active clients` : 'View client billing'}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
-              </TouchableOpacity>
+                {canSeeClientsDirectory && (
+                  <TouchableOpacity style={styles.directoryCard} onPress={() => router.push('/list?tab=clients')}>
+                    <View style={[styles.directoryIconContainer, { backgroundColor: '#E4F4E8' }]}>
+                      <Ionicons name="briefcase" size={24} color="#4CAF50" />
+                    </View>
+                    <View style={styles.directoryInfo}>
+                      <Text style={styles.directoryTitle}>Clients</Text>
+                      <Text style={styles.directoryStats}>
+                        {stats.totalClients > 0 ? `${stats.totalClients} active clients` : 'View all clients'}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
+                  </TouchableOpacity>
+                )}
 
-              {/* Invoice Card */}
-              <TouchableOpacity
-                style={styles.directoryCard}
-                onPress={() => router.push('/invoices' as any)}
-              >
-                <View style={[styles.directoryIconContainer, { backgroundColor: '#FDECE8' }]}>
-                  <Ionicons name="receipt" size={24} color="#FF6B6B" />
-                </View>
-                <View style={styles.directoryInfo}>
-                  <Text style={styles.directoryTitle}>Invoices</Text>
-                  <Text style={styles.directoryStats}>
-                    Paid: {stats.paidInvoices} • Due: {stats.unpaidInvoices}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
-              </TouchableOpacity>
-              </>
-              )}
-            </View>
+                {/* <TouchableOpacity style={styles.directoryCard} onPress={() => router.push('/invoices' as any)}>
+                  <View style={[styles.directoryIconContainer, { backgroundColor: '#FDECE8' }]}>
+                    <Ionicons name="receipt" size={24} color="#FF6B6B" />
+                  </View>
+                  <View style={styles.directoryInfo}>
+                    <Text style={styles.directoryTitle}>Invoices</Text>
+                    <Text style={styles.directoryStats}>
+                      Paid: {stats.paidInvoices} • Due: {stats.unpaidInvoices}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#CCCCCC" />
+                </TouchableOpacity> */}
+              </View>
+            )}
+
+            {canSeeTasks && (
+              <View style={styles.employeeTaskSection}>
+                <Text style={styles.sectionTitle}>{isManager ? 'Team Tasks' : 'My Current Tasks'}</Text>
+                {filteredEmployeeTasks.length === 0 ? (
+                  <View style={styles.emptyTasksBox}>
+                    <Ionicons name="document-text-outline" size={30} color="#9CA3AF" />
+                    <Text style={styles.emptyTasksText}>No assigned tasks right now.</Text>
+                  </View>
+                ) : (
+                  filteredEmployeeTasks.map((task) => {
+                    const taskId = task.id || task._id;
+                    const badge = statusBadge(task.status);
+                    const isMenuOpen = openMenuTaskId === taskId;
+                    return (
+                      <TouchableOpacity
+                        key={taskId}
+                        style={styles.taskCard}
+                        onPress={() => router.push(`/task-detail?taskId=${taskId}` as any)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.taskCardTop}>
+                          <Text style={styles.taskTitle}>{task.title}</Text>
+                          <View style={styles.taskCardTopRight}>
+                            <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+                              <Text style={[styles.statusBadgeText, { color: badge.color }]}>{badge.text}</Text>
+                            </View>
+                            <TouchableOpacity
+                              style={styles.kebabButton}
+                              onPress={() => toggleMenu(taskId)}
+                              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                              <Ionicons name="ellipsis-vertical" size={18} color="#6B7280" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        <Text style={styles.taskDescription}>{task.description || 'No description provided.'}</Text>
+                        {!!task.clientName && <Text style={styles.taskMeta}>Client: {task.clientName}</Text>}
+
+                        {isMenuOpen && (
+                          <View style={styles.menuDropdown}>
+                            {statusOptions.map((option) => {
+                              // Don't show the option that matches current status
+                              if (option.value === task.status) return null;
+                              return (
+                                <TouchableOpacity
+                                  key={option.value}
+                                  style={styles.menuItem}
+                                  onPress={() => {
+                                    if (option.value === 'update_status') {
+                                      openStatusUpdateModal(task);
+                                    } else {
+                                      handleQuickStatusUpdate(taskId, option.value);
+                                    }
+                                  }}
+                                >
+                                  <Ionicons name={option.icon as any} size={18} color={option.iconColor} />
+                                  <Text style={styles.menuItemText}>{option.label}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </View>
+            )}
           </>
         )}
       </ScrollView>
 
-      {/* Quick Notification Modal removed as notification bell is updated to settings */}
+      {/* Status Update Full Screen Page */}
+      <Modal visible={showUpdateModal} animationType="slide" transparent={false} onRequestClose={() => setShowUpdateModal(false)}>
+        <KeyboardAvoidingView
+          style={{ flex: 1, backgroundColor: '#F4F6F8' }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        >
+          {/* Top Bar */}
+          <View style={styles.updatePageTopBar}>
+            <TouchableOpacity onPress={() => setShowUpdateModal(false)} style={{ marginRight: 12 }}>
+              <Ionicons name="arrow-back" size={24} color="#111827" />
+            </TouchableOpacity>
+            <Text style={styles.updatePageTopBarTitle}>Update Task Status</Text>
+          </View>
+
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.updatePageContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Show original task info as read-only */}
+            {editingTask && (
+              <View style={styles.originalTaskInfo}>
+                <Text style={styles.originalTaskLabel}>Task</Text>
+                <Text style={styles.originalTaskTitle}>{editingTask.title}</Text>
+                {!!editingTask.description && (
+                  <Text style={styles.originalTaskDesc} numberOfLines={2}>{editingTask.description}</Text>
+                )}
+              </View>
+            )}
+
+            <Text style={styles.modalLabel}>What are you working on? <Text style={{ color: '#DC2626' }}>*</Text></Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g. Filling the taxation forms"
+              value={updateSubTitle}
+              onChangeText={setUpdateSubTitle}
+              placeholderTextColor="#9CA3AF"
+            />
+
+            <Text style={styles.modalLabel}>Details (optional)</Text>
+            <TextInput
+              style={[styles.modalInput, styles.modalTextarea]}
+              multiline
+              placeholder="Any additional details about your progress..."
+              value={updateSubDescription}
+              onChangeText={setUpdateSubDescription}
+              placeholderTextColor="#9CA3AF"
+            />
+
+            <Text style={styles.modalLabel}>Status</Text>
+            <View style={styles.statusChipsRow}>
+              {[
+                { label: 'Pending', value: 'pending' as const, color: '#6B7280', bg: '#F3F4F6' },
+                { label: 'In Progress', value: 'in_progress' as const, color: '#1D4ED8', bg: '#DBEAFE' },
+                { label: 'Completed', value: 'completed' as const, color: '#166534', bg: '#DCFCE7' },
+                { label: 'Cancelled', value: 'cancelled' as const, color: '#991B1B', bg: '#FEE2E2' },
+              ].map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.statusChip,
+                    updateStatus === option.value && { backgroundColor: option.bg, borderColor: option.color },
+                  ]}
+                  onPress={() => setUpdateStatus(option.value)}
+                >
+                  <Text
+                    style={[
+                      styles.statusChipText,
+                      updateStatus === option.value && { color: option.color, fontWeight: '700' },
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.modalActionButton, styles.modalCancel]} onPress={() => setShowUpdateModal(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalActionButton, styles.modalSave]}
+                onPress={saveStatusUpdate}
+                disabled={isTaskSaving}
+              >
+                {isTaskSaving ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalSaveText}>Save Update</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Extra bottom spacing so content isn't hidden behind keyboard */}
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -398,7 +710,6 @@ const styles = StyleSheet.create({
   },
   notificationIconTop: {
     padding: 8,
-    position: 'relative',
   },
   searchContainer: {
     flexDirection: 'row',
@@ -417,16 +728,43 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  // Loading & Error States
-  loadingContainer: {
+  inlineLoadingRow: {
+    marginHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 6,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
+    gap: 8,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#666666',
+  inlineLoadingText: {
+    fontSize: 12,
+    color: '#374151',
+    fontWeight: '600',
+  },
+  cachedInfoBanner: {
+    marginHorizontal: 20,
+    marginTop: 6,
+    marginBottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  cachedInfoText: {
+    fontSize: 12,
+    color: '#92400E',
+    fontWeight: '600',
   },
   errorContainer: {
     alignItems: 'center',
@@ -458,7 +796,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
-  // Financial Overview Card
   overviewCard: {
     backgroundColor: '#1a1a2e',
     marginHorizontal: 20,
@@ -513,7 +850,6 @@ const styles = StyleSheet.create({
     height: 36,
     backgroundColor: '#374151',
   },
-  // Stats Grid
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -592,4 +928,221 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666666',
   },
+  employeeTaskSection: {
+    paddingBottom: 26,
+  },
+  emptyTasksBox: {
+    marginHorizontal: 20,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    gap: 8,
+  },
+  emptyTasksText: {
+    color: '#6B7280',
+    fontSize: 14,
+  },
+  taskCard: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    padding: 14,
+  },
+  taskCardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 8,
+  },
+  taskCardTopRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  taskTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  taskDescription: {
+    fontSize: 13,
+    color: '#4B5563',
+    lineHeight: 20,
+    marginBottom: 10,
+  },
+  taskMeta: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  kebabButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  menuDropdown: {
+    marginTop: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 6,
+    overflow: 'hidden',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  menuItemText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
+  },
+  // Update Page (Full Screen)
+  updatePageTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 58,
+    paddingHorizontal: 18,
+    paddingBottom: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  updatePageTopBarTitle: {
+    flex: 1,
+    fontSize: 21,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  updatePageContent: {
+    padding: 18,
+    paddingBottom: 40,
+  },
+  originalTaskInfo: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  originalTaskLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  originalTaskTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  originalTaskDesc: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  modalLabel: {
+    fontSize: 13,
+    color: '#374151',
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    marginBottom: 16,
+    fontSize: 14,
+    color: '#111827',
+  },
+  modalTextarea: {
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  statusChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 20,
+  },
+  statusChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+  },
+  statusChipText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  modalActionButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancel: {
+    backgroundColor: '#F3F4F6',
+  },
+  modalSave: {
+    backgroundColor: '#000000',
+  },
+  modalCancelText: {
+    color: '#374151',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  modalSaveText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 15,
+  },
 });
+
+
+

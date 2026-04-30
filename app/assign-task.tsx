@@ -1,5 +1,5 @@
 import { createTask, getClients } from '@/services/api';
-import { Priority, Client } from '@/types';
+import { Priority } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -12,6 +12,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 
 export default function AssignTask() {
@@ -24,7 +26,6 @@ export default function AssignTask() {
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-const [selectedDate, setSelectedDate] = useState(new Date());
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [deadline, setDeadline] = useState('');
@@ -115,7 +116,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
   const handleDateChange = (event: any, date?: Date) => {
     setShowDatePicker(false);
     if (date) {
-      setSelectedDate(date);
+      setDeadlineDate(date);
       setDeadline(date.toISOString().split('T')[0]);
     }
   };
@@ -131,15 +132,16 @@ const [selectedDate, setSelectedDate] = useState(new Date());
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Assignee Info */}
-        <View style={styles.assigneeCard}>
-          <Text style={styles.assigneeLabel}>Assigning to:</Text>
-          <Text style={styles.assigneeName}>{employeeName}</Text>
-        </View>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          {/* Assignee Info */}
+          <View style={styles.assigneeCard}>
+            <Text style={styles.assigneeLabel}>Assigning to:</Text>
+            <Text style={styles.assigneeName}>{employeeName}</Text>
+          </View>
 
-        {/* Form */}
-        <View style={styles.form}>
+          {/* Form */}
+          <View style={styles.form}>
           {/* Title */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>
@@ -318,6 +320,7 @@ const [selectedDate, setSelectedDate] = useState(new Date());
           </Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -511,3 +514,4 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+

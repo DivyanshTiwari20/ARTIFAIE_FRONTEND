@@ -18,8 +18,23 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { login } = useAuth();
+  const { login, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+
+  // Auto-redirect if already logged in
+  React.useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      router.replace('/(tabs)/home');
+    }
+  }, [isLoading, isAuthenticated, router]);
+
+  if (isLoading || isAuthenticated) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#000000" />
+      </View>
+    );
+  }
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -57,6 +72,7 @@ export default function LoginScreen() {
             <TextInput
               style={styles.input}
               placeholder="Enter your email"
+              placeholderTextColor="#999999"
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -72,6 +88,7 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.passwordInput}
                 placeholder="Enter your password"
+                placeholderTextColor="#999999"
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
@@ -147,6 +164,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#E5E5E5',
+    color: '#000000',
   },
   passwordContainer: {
     flexDirection: 'row',
@@ -161,6 +179,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     fontSize: 16,
+    color: '#000000',
   },
   eyeIcon: {
     padding: 4,

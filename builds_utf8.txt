@@ -1,0 +1,38 @@
+﻿
+Builds for @divyanshh/artifae-mobile:
+
+ID                       e8d6511f-f6ca-412a-8c77-2906f6dca607
+Platform                 iOS
+Status                   finished
+Profile                  production
+Distribution             store
+SDK Version              54.0.0
+Version                  1.0.0
+Build number             4
+Commit                   8dba6c73fb53839bf3fc70222296a01297d86a2f
+Logs                     https://expo.dev/accounts/divyanshh/projects/artifae-mobile/builds/e8d6511f-f6ca-412a-8c77-2906f6dca607
+Application Archive URL  https://expo.dev/artifacts/eas/uKANYbAoptb4C2ehxaUNiD.ipa
+Build Artifacts URL      null
+Fingerprint              b5880c2898fcbc9d2e7e7a8db52ebaf0f2f7eda2
+Started at               3/4/2026, 12:37:16 am
+Finished at              3/4/2026, 3:07:37 am
+Started by               divyanshh
+
+ΓÇöΓÇöΓÇö
+
+ID                       27d67413-dfd4-440b-a01d-bf9a8c7d05e9
+Platform                 iOS
+Status                   finished
+Profile                  production
+Distribution             store
+SDK Version              54.0.0
+Version                  1.0.0
+Build number             3
+Commit                   9665c2e7ba0ad449b137ae6a721ec182d973c158
+Logs                     https://expo.dev/accounts/divyanshh/projects/artifae-mobile/builds/27d67413-dfd4-440b-a01d-bf9a8c7d05e9
+Application Archive URL  https://expo.dev/artifacts/eas/5VjCkurZQM6zprbb9sF7AD.ipa
+Build Artifacts URL      null
+Fingerprint              3a224f7a4a54355939af4b1385f5f7a4257ea786
+Started at               28/3/2026, 1:18:10 pm
+Finished at              28/3/2026, 1:23:15 pm
+Started by               divyanshh

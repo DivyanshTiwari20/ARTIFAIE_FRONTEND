@@ -64,6 +64,7 @@ export default function UpdatePasswordPage() {
         <TextInput
           style={styles.input}
           placeholder="Enter current password"
+          placeholderTextColor="#999999"
           secureTextEntry
           value={oldPassword}
           onChangeText={setOldPassword}
@@ -73,6 +74,7 @@ export default function UpdatePasswordPage() {
         <TextInput
           style={styles.input}
           placeholder="Enter new password"
+          placeholderTextColor="#999999"
           secureTextEntry
           value={newPassword}
           onChangeText={setNewPassword}
@@ -82,6 +84,7 @@ export default function UpdatePasswordPage() {
         <TextInput
           style={styles.input}
           placeholder="Confirm new password"
+          placeholderTextColor="#999999"
           secureTextEntry
           value={confirmPassword}
           onChangeText={setConfirmPassword}
@@ -149,6 +152,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
+    color: '#000000',
   },
   infoText: {
     fontSize: 12,

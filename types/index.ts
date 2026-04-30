@@ -6,6 +6,7 @@ export interface User {
   role: UserRole;
   name: string;
   avatar?: string;
+  profileImageUrl?: string;
 }
 
 export interface Task {
@@ -49,6 +50,8 @@ export interface Notification {
     tasksAssigned: number;
     /** Optional UI flag from API (falls back to status if omitted). */
     isActive?: boolean;
+    avatar?: string;
+    profileImageUrl?: string;
   }
   
   export interface Client {

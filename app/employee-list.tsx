@@ -1,24 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
-import {
-  Modal,
-  Pressable,
-  ScrollView,
+import React, { useState } from 'react';
+import {  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useAuth } from '../context/AuthContext';
 
+import { formatNameWithPrefix } from '@/lib/namePrefix';
 import { getEmployees } from '@/services/api';
 
 // Removed manual work status dropdown component because work status applies to tasks, not employees in DB.
 
 export default function EmployeeList() {
-  const { user } = useAuth();
-  const router = useRouter();
+    const router = useRouter();
   const [employees, setEmployees] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -27,7 +23,8 @@ export default function EmployeeList() {
       try {
         const res = await getEmployees();
         if (res.success) {
-          setEmployees(res.data);
+          const sorted = [...(res.data || [])].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          setEmployees(sorted);
         }
       } catch (err) {
         console.error('Failed to load employees:', err);
@@ -62,15 +59,15 @@ export default function EmployeeList() {
         >
           <View style={styles.table}>
             <View style={[styles.row, styles.headerRow]}>
-              <Text style={[styles.cell, styles.headerCell, { flex: 0.5 }]}>
+              <Text style={[styles.cell, styles.headerCell, { width: 50 }]}>
                 S.No
               </Text>
-              <Text style={[styles.cell, styles.headerCell]}>Name</Text>
-              <Text style={[styles.cell, styles.headerCell]}>Email</Text>
-              <Text style={[styles.cell, styles.headerCell]}>Role</Text>
-              <Text style={[styles.cell, styles.headerCell]}>Department</Text>
-              <Text style={[styles.cell, styles.headerCell]}>Joined</Text>
-              <Text style={[styles.cell, styles.headerCell]}>System Access</Text>
+              <Text style={[styles.cell, styles.headerCell, { width: 130 }]}>Name</Text>
+              <Text style={[styles.cell, styles.headerCell, { width: 180 }]}>Email</Text>
+              <Text style={[styles.cell, styles.headerCell, { width: 90 }]}>Role</Text>
+              <Text style={[styles.cell, styles.headerCell, { width: 120 }]}>Department</Text>
+              <Text style={[styles.cell, styles.headerCell, { width: 100 }]}>Joined</Text>
+              <Text style={[styles.cell, styles.headerCell, { width: 110 }]}>System Access</Text>
             </View>
 
             {employees.length === 0 && !isLoading && (
@@ -81,15 +78,13 @@ export default function EmployeeList() {
 
             {employees.map((employee, index) => (
               <View key={employee.id || employee._id || index} style={[styles.row, styles.dataRow]}>
-                <Text style={[styles.cell, { flex: 0.5 }]}>{index + 1}</Text>
-                <Text style={styles.cell}>{employee.name}</Text>
-                <Text style={styles.cell}>{employee.email}</Text>
-                <Text style={styles.cell}>{employee.role?.toUpperCase()}</Text>
-                <Text style={styles.cell}>{employee.department || '-'}</Text>
-                <Text style={styles.cell}>
-                  {new Date(employee.createdAt).toLocaleDateString()}
-                </Text>
-                <View style={[styles.cell, styles.statusCell]}>
+                <Text style={[styles.cell, styles.dataCell, { width: 50 }]}>{index + 1}</Text>
+                <Text style={[styles.cell, styles.dataCell, { width: 130 }]} numberOfLines={1}>{formatNameWithPrefix(employee.name, employee.gender)}</Text>
+                <Text style={[styles.cell, styles.dataCell, { width: 180 }]} numberOfLines={1}>{employee.email}</Text>
+                <Text style={[styles.cell, styles.dataCell, { width: 90 }]}>{employee.role?.toUpperCase()}</Text>
+                <Text style={[styles.cell, styles.dataCell, { width: 120 }]} numberOfLines={1}>{employee.department || '-'}</Text>
+                <Text style={[styles.cell, styles.dataCell, { width: 100 }]}>{new Date(employee.createdAt).toLocaleDateString()}</Text>
+                <View style={[styles.cell, styles.statusCell, { width: 110 }]}>
                   <View
                     style={[
                       styles.statusBadge,
@@ -191,7 +186,6 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F2F2F2',
   },
   cell: {
-    flex: 1,
     paddingVertical: 14,
     paddingHorizontal: 12,
     fontSize: 14,
@@ -203,10 +197,16 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.3,
     fontSize: 12,
+    textAlign: 'left',
+  },
+  dataCell: {
+    fontWeight: '400',
+    color: '#111111',
+    textAlign: 'left',
   },
   statusCell: {
     flexDirection: 'column',
-    gap: 8,
+    justifyContent: 'center',
   },
   statusBadge: {
     alignSelf: 'flex-start',
@@ -304,3 +304,4 @@ const styles = StyleSheet.create({
     color: '#3578e5',
   },
 });
+

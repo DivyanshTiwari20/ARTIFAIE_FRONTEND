@@ -2,10 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function FloatingActionButton() {
   const [isOpen, setIsOpen] = useState(false);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const toggleOpen = () => setIsOpen(!isOpen);
 
@@ -20,7 +22,7 @@ export default function FloatingActionButton() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { bottom: 72 + Math.max(insets.bottom, 8) }]}>
       {isOpen && (
         <View style={styles.menu}>
           <TouchableOpacity style={styles.menuItem} onPress={handleCreateClient}>
@@ -38,16 +40,8 @@ export default function FloatingActionButton() {
         </View>
       )}
 
-      <TouchableOpacity
-        style={[styles.fab, isOpen && styles.fabOpen]}
-        onPress={toggleOpen}
-        activeOpacity={0.8}
-      >
-        <Ionicons
-          name={isOpen ? "close" : "add"}
-          size={32}
-          color="#FFFFFF"
-        />
+      <TouchableOpacity style={[styles.fab, isOpen && styles.fabOpen]} onPress={toggleOpen} activeOpacity={0.8}>
+        <Ionicons name={isOpen ? 'close' : 'add'} size={32} color="#FFFFFF" />
       </TouchableOpacity>
     </View>
   );
@@ -56,7 +50,6 @@ export default function FloatingActionButton() {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 110,
     right: 24,
     alignItems: 'flex-end',
     zIndex: 9999,

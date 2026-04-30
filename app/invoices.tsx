@@ -4,9 +4,7 @@ import { InvoiceItem } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  RefreshControl,
+import {  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -67,21 +65,36 @@ export default function InvoicesScreen() {
 
   const filters: PaymentFilter[] = ['All', 'Paid', 'Partial', 'Unpaid', 'Overdue'];
 
-  const fetchInvoices = useCallback(async () => {
+  const fetchInvoices = useCallback(async (forceRefresh = false) => {
     try {
       setError(null);
       const filterParam = selectedFilter === 'All' ? undefined : selectedFilter;
-      const res = await getInvoiceRegister(undefined, undefined, undefined, filterParam);
+      const res = await getInvoiceRegister(
+        undefined,
+        undefined,
+        undefined,
+        filterParam,
+        {
+          forceRefresh,
+          staleWhileRevalidate: !forceRefresh,
+        }
+      );
 
       if (res.success) {
         setInvoices(res.data?.invoices || []);
-        setSummary(res.data?.summary || {
-          totalInvoices: 0,
-          paidCount: 0,
-          partialCount: 0,
-          unpaidCount: 0,
-          overdueCount: 0,
-        });
+        setSummary(
+          res.data?.summary || {
+            totalInvoices: 0,
+            paidCount: 0,
+            partialCount: 0,
+            unpaidCount: 0,
+            overdueCount: 0,
+          }
+        );
+
+        if (!forceRefresh && res._cache?.source === 'local' && res._cache?.stale) {
+          void fetchInvoices(true);
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load invoices');
@@ -93,12 +106,12 @@ export default function InvoicesScreen() {
 
   useEffect(() => {
     setIsLoading(true);
-    fetchInvoices();
+    fetchInvoices(false);
   }, [fetchInvoices]);
 
   const onRefresh = useCallback(() => {
     setIsRefreshing(true);
-    fetchInvoices();
+    fetchInvoices(true);
   }, [fetchInvoices]);
 
   const filteredInvoices = invoices.filter(inv => {
@@ -479,3 +492,5 @@ const styles = StyleSheet.create({
     color: '#999',
   },
 });
+
+

@@ -28,6 +28,10 @@ export default function RootLayout() {
             <Stack.Screen name="employee-list" options={{ headerShown: false }} />
             <Stack.Screen name="update-password" options={{ headerShown: false }} />
             <Stack.Screen name="settings" options={{ headerShown: false }} />
+            <Stack.Screen name="privacy-policy" options={{ headerShown: false }} />
+            <Stack.Screen name="help-support" options={{ headerShown: false }} />
+            <Stack.Screen name="faq" options={{ headerShown: false }} />
+            <Stack.Screen name="about" options={{ headerShown: false }} />
           </Stack>
         </View>
       </AuthProvider>

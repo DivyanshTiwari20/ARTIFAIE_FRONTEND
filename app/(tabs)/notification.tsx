@@ -6,11 +6,9 @@ import { Notification, NotificationFilter } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { isAdminOrManager } from '@/lib/roles';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
-import {
-    ActivityIndicator,
-    Alert,
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {    Alert,
     RefreshControl,
     ScrollView,
     StyleSheet,
@@ -19,23 +17,28 @@ import {
     View,
 } from 'react-native';
 
+const NOTIFICATION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
 export default function NotificationPage() {
-  const { user } = useAuth();
+  const { user, notificationRefreshKey } = useAuth();
   const router = useRouter();
   const showModeToggle = isAdminOrManager(user?.role);
   
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [selectedFilter, setSelectedFilter] = useState<NotificationFilter>('all');
+  const [selectedFilter, setSelectedFilter] = useState<NotificationFilter>('today');
   const [mode, setMode] = useState<'task' | 'general'>('task');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const fetchNotifications = useCallback(async () => {
-    if (!user) return; // Don't fetch until logged in
+  const fetchNotifications = useCallback(async (forceRefresh = false) => {
+    if (!user) return;
     try {
       setFetchError(null);
-      const res = await getNotifications(showModeToggle ? mode : undefined);
+      const res = await getNotifications(showModeToggle ? mode : undefined, {
+        forceRefresh: true,
+        staleWhileRevalidate: false,
+      });
       if (res && res.success) {
         const raw = res.data;
         const list = Array.isArray(raw)
@@ -57,17 +60,26 @@ export default function NotificationPage() {
     }
   }, [mode, showModeToggle, user]);
 
-  // Re-fetch every time this screen is focused (e.g., after creating a task)
-  useFocusEffect(
-    useCallback(() => {
-      setIsLoading(true);
-      fetchNotifications();
-    }, [fetchNotifications])
-  );
+  useEffect(() => {
+    if (!user) return;
+    setIsLoading(true);
+    fetchNotifications(true);
+    const intervalId = setInterval(() => {
+      fetchNotifications(true);
+    }, NOTIFICATION_REFRESH_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [fetchNotifications, user]);
+
+  // Auto-refresh when a push notification arrives (via AuthContext)
+  useEffect(() => {
+    if (notificationRefreshKey > 0 && user) {
+      fetchNotifications(true);
+    }
+  }, [notificationRefreshKey]);
 
   const onRefresh = useCallback(() => {
     setIsRefreshing(true);
-    fetchNotifications();
+    fetchNotifications(true);
   }, [fetchNotifications]);
 
   const filterNotifications = () => {
@@ -260,7 +272,7 @@ export default function NotificationPage() {
             />
             <Text style={styles.emptyText}>No notifications</Text>
             <Text style={styles.emptySubText}>
-              You're all caught up for this period
+              You&apos;re all caught up for this period
             </Text>
           </View>
         )}
@@ -401,3 +413,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+
+
+

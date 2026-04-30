@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "artifae",
-    "slug": "artifae-mobile",
-    "version": "1.0.0",
+    "name": "AGP",
+    "slug": "agp-mobile",
+    "version": "1.0.2",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "artifae",
+    "icon": "./assets/images/icon1.png",
+    "scheme": "agp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.artifaie.app",
+      "bundleIdentifier": "com.agpcorporation.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
@@ -25,12 +25,10 @@
       }
     },
     "android": {
-      "package": "com.artifaie.app",
+      "package": "com.agpcorporation.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/images/android-icon-foreground.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
@@ -60,7 +58,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
