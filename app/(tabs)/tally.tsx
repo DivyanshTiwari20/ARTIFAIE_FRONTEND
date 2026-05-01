@@ -14,7 +14,7 @@ const renderValue = (value: any): React.ReactNode => {
   if (value === null || value === undefined) return <Text style={styles.valueNull}>N/A</Text>;
   if (typeof value === 'boolean') return <Text style={styles.valueText}>{value ? 'Yes' : 'No'}</Text>;
   if (typeof value === 'string' || typeof value === 'number') return <Text style={styles.valueText}>{String(value)}</Text>;
-  
+
   if (Array.isArray(value)) {
     if (value.length === 0) return <Text style={styles.valueNull}>Empty List</Text>;
     return (
@@ -43,7 +43,7 @@ const renderValue = (value: any): React.ReactNode => {
       </View>
     );
   }
-  
+
   return <Text style={styles.valueText}>{String(value)}</Text>;
 };
 
@@ -202,11 +202,11 @@ export default function Tally() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Tally Data Integrations</Text>
+        <Text style={styles.headerTitle}>Tally Data</Text>
         <View style={styles.headerRow}>
-          <Text style={styles.headerSubtitle}>
+          {/* <Text style={styles.headerSubtitle}>
             Auto-fetch enabled for all endpoints. Tap any card for detailed response.
-          </Text>
+          </Text> */}
           <TouchableOpacity
             style={[styles.refreshButton, anyLoading && { opacity: 0.5 }]}
             disabled={anyLoading}

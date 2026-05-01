@@ -110,6 +110,13 @@ export default function PendingTasksScreen() {
     try {
       setIsSubmitting(true);
       if (editingTaskId) {
+        // Optimistic update
+        setTasks(prev => prev.map(t => (t.id || t._id) === editingTaskId 
+          ? { ...t, title: taskTitle.trim(), description: taskDescription.trim(), status: taskStatus } 
+          : t
+        ));
+        setShowTaskModal(false);
+
         const res = await updateTask(editingTaskId, {
           title: taskTitle.trim(),
           description: taskDescription.trim(),
@@ -117,12 +124,14 @@ export default function PendingTasksScreen() {
         });
         if (!res.success) {
           Alert.alert('Error', res.message || 'Failed to update task');
+          void fetchPendingTasks(true);
           return;
         }
+      } else {
+        setShowTaskModal(false);
       }
 
-      setShowTaskModal(false);
-      await fetchPendingTasks(true);
+      void fetchPendingTasks(true);
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to save task');
     } finally {
@@ -141,12 +150,14 @@ export default function PendingTasksScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            // Optimistic Delete
+            setTasks((prev) => prev.filter((t) => (t.id || t._id) !== taskId));
+            
             try {
               const res = await deleteTask(taskId);
-              if (res.success) {
-                setTasks((prev) => prev.filter((t) => (t.id || t._id) !== taskId));
-              } else {
+              if (!res.success) {
                 Alert.alert('Error', res.message || 'Failed to delete task');
+                void fetchPendingTasks(true);
               }
             } catch (e: any) {
               Alert.alert('Error', 'Failed to connect to the server');

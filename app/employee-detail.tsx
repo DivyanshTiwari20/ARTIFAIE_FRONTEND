@@ -224,6 +224,13 @@ function EmployeeProfileScreen() {
     try {
       setIsSubmitting(true);
       if (editingTaskId) {
+        // Optimistic update
+        setTasks(prev => prev.map(t => String(t.id || t._id) === editingTaskId 
+          ? { ...t, title: taskTitle.trim(), description: taskDescription.trim(), status: taskStatus } 
+          : t
+        ));
+        setShowTaskModal(false);
+        
         const res = await updateTask(editingTaskId, {
           title: taskTitle.trim(),
           description: taskDescription.trim(),
@@ -231,6 +238,7 @@ function EmployeeProfileScreen() {
         });
         if (!res.success) {
           Alert.alert('Error', res.message || 'Failed to update task');
+          void fetchTasks(true);
           return;
         }
       } else {
@@ -244,10 +252,11 @@ function EmployeeProfileScreen() {
           Alert.alert('Error', res.message || 'Failed to create task');
           return;
         }
+        setShowTaskModal(false);
       }
 
-      setShowTaskModal(false);
-      await fetchTasks();
+      // Background sync
+      void fetchTasks(true);
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to save task');
     } finally {
@@ -256,8 +265,12 @@ function EmployeeProfileScreen() {
   };
 
   const handleDeleteTaskById = async (taskId: string) => {
+    // Optimistic delete
+    setTasks(prev => prev.filter(t => String(t.id || t._id) !== taskId));
+    
     const res = await deleteTask(taskId);
     if (!res.success) {
+      void fetchTasks(true);
       throw new Error(res.message || 'Failed to delete task');
     }
   };
@@ -274,7 +287,6 @@ function EmployeeProfileScreen() {
         onPress: async () => {
           try {
             await handleDeleteTaskById(id);
-            await fetchTasks();
           } catch (e: any) {
             Alert.alert('Error', e?.message || 'Failed to delete task');
           }
@@ -295,7 +307,6 @@ function EmployeeProfileScreen() {
           try {
             await Promise.all(selectedTaskIds.map((id) => handleDeleteTaskById(id)));
             exitSelectionMode();
-            await fetchTasks();
           } catch (e: any) {
             Alert.alert('Error', e?.message || 'Failed to delete selected tasks');
           }
