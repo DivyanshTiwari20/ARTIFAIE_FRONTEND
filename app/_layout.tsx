@@ -24,6 +24,8 @@ export default function RootLayout() {
             <Stack.Screen name="employee-detail" options={{ headerShown: false }} />
             <Stack.Screen name="assign-task" options={{ headerShown: false }} />
             <Stack.Screen name="create-task" options={{ headerShown: false }} />
+            <Stack.Screen name="pending-tasks" options={{ headerShown: false }} />
+            <Stack.Screen name="task-detail" options={{ headerShown: false }} />
             <Stack.Screen name="create-client" options={{ headerShown: false }} />
             <Stack.Screen name="employee-list" options={{ headerShown: false }} />
             <Stack.Screen name="update-password" options={{ headerShown: false }} />

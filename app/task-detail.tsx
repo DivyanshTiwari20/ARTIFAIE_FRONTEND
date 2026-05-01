@@ -7,15 +7,15 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 
 type TaskUpdateItem = {
@@ -170,8 +170,13 @@ export default function TaskDetailScreen() {
       return;
     }
 
+    // Optimistically update local state and close modal
+    if (task) {
+      setTask({ ...task, status: updateStatus });
+    }
+    setShowUpdateModal(false);
+
     try {
-      setIsSaving(true);
       const res = await createTaskUpdate(taskId, {
         title: updateSubTitle.trim(),
         description: updateSubDescription.trim() || undefined,
@@ -179,15 +184,14 @@ export default function TaskDetailScreen() {
       });
 
       if (res.success) {
-        setShowUpdateModal(false);
-        await fetchTask();
+        fetchTask(); // fetch in background to get new updates list
       } else {
         Alert.alert('Error', res.message || 'Failed to save update');
+        fetchTask(); // revert
       }
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to save update');
-    } finally {
-      setIsSaving(false);
+      fetchTask(); // revert
     }
   };
 

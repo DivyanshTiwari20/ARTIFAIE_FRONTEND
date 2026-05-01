@@ -35,9 +35,9 @@ export default function NotificationPage() {
     if (!user) return;
     try {
       setFetchError(null);
-      const res = await getNotifications(showModeToggle ? mode : undefined, {
-        forceRefresh: true,
-        staleWhileRevalidate: false,
+      const res = await getNotifications(showModeToggle ? mode : undefined, selectedFilter, {
+        forceRefresh,
+        staleWhileRevalidate: true,
       });
       if (res && res.success) {
         const raw = res.data;
@@ -58,17 +58,26 @@ export default function NotificationPage() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [mode, showModeToggle, user]);
+  }, [mode, showModeToggle, user, selectedFilter]);
 
   useEffect(() => {
     if (!user) return;
     setIsLoading(true);
-    fetchNotifications(true);
+    // Use false to allow cache to return data instantly
+    fetchNotifications(false);
     const intervalId = setInterval(() => {
       fetchNotifications(true);
     }, NOTIFICATION_REFRESH_INTERVAL_MS);
     return () => clearInterval(intervalId);
   }, [fetchNotifications, user]);
+
+  // Fetch when filter changes
+  useEffect(() => {
+    if (user) {
+      setIsLoading(true);
+      fetchNotifications(false);
+    }
+  }, [selectedFilter, mode]);
 
   // Auto-refresh when a push notification arrives (via AuthContext)
   useEffect(() => {

@@ -9,6 +9,7 @@ import {
   updateTaskStatus,
   getClients,
   getTaskCounts,
+  getEmployees,
 } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -109,6 +110,16 @@ export default function Home() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isTaskSaving, setIsTaskSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Global search state
+  const [globalResults, setGlobalResults] = useState<{
+    employees: any[];
+    tasks: any[];
+    clients: any[];
+  }>({ employees: [], tasks: [], clients: [] });
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const searchTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Three-dots menu state
   const [openMenuTaskId, setOpenMenuTaskId] = useState<string | null>(null);
@@ -252,23 +263,87 @@ export default function Home() {
     }
   }, [notificationRefreshKey]);
 
-  const filteredEmployeeTasks = useMemo(() => {
-    if (!searchQuery.trim()) return employeeTasks;
-    const q = searchQuery.toLowerCase();
-    return employeeTasks.filter((task) => {
-      const title = (task.title || '').toLowerCase();
-      const description = (task.description || '').toLowerCase();
-      return title.includes(q) || description.includes(q);
-    });
-  }, [employeeTasks, searchQuery]);
+  const filteredEmployeeTasks = employeeTasks;
+
+  const performGlobalSearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setGlobalResults({ employees: [], tasks: [], clients: [] });
+      setShowSearchResults(false);
+      return;
+    }
+
+    setIsSearching(true);
+    setShowSearchResults(true);
+    const q = query.toLowerCase();
+
+    try {
+      const [empRes, taskRes, clientRes] = await Promise.allSettled([
+        getEmployees({ staleWhileRevalidate: true }),
+        getTasks({}, { staleWhileRevalidate: true }),
+        getClients({ staleWhileRevalidate: true }),
+      ]);
+
+      const employees = (empRes.status === 'fulfilled' && empRes.value.success)
+        ? (empRes.value.data || []).filter((e: any) =>
+            (e.name || '').toLowerCase().includes(q) ||
+            (e.email || '').toLowerCase().includes(q) ||
+            (e.role || '').toLowerCase().includes(q)
+          ).slice(0, 5)
+        : [];
+
+      const tasks = (taskRes.status === 'fulfilled' && taskRes.value.success)
+        ? (taskRes.value.data || []).filter((t: any) =>
+            (t.title || '').toLowerCase().includes(q) ||
+            (t.description || '').toLowerCase().includes(q) ||
+            (t.clientName || '').toLowerCase().includes(q)
+          ).slice(0, 5)
+        : [];
+
+      const clients = (clientRes.status === 'fulfilled' && clientRes.value.success)
+        ? (clientRes.value.data || []).filter((c: any) =>
+            (c.name || '').toLowerCase().includes(q) ||
+            (c.contactPerson || '').toLowerCase().includes(q) ||
+            (c.email || '').toLowerCase().includes(q)
+          ).slice(0, 5)
+        : [];
+
+      setGlobalResults({ employees, tasks, clients });
+    } catch {
+      setGlobalResults({ employees: [], tasks: [], clients: [] });
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
+
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchQuery(text);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    if (!text.trim()) {
+      setGlobalResults({ employees: [], tasks: [], clients: [] });
+      setShowSearchResults(false);
+      return;
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      performGlobalSearch(text);
+    }, 300);
+  }, [performGlobalSearch]);
+
+  const totalResults = globalResults.employees.length + globalResults.tasks.length + globalResults.clients.length;
 
   const handleQuickStatusUpdate = async (taskId: string, status: string) => {
     try {
       setOpenMenuTaskId(null);
-      await updateTaskStatus(taskId, status);
+      // Optimistic update
       setEmployeeTasks((prev) => prev.map((t) => ((t.id || t._id) === taskId ? { ...t, status } : t)));
+      
+      const res = await updateTaskStatus(taskId, status);
+      if (!res.success) {
+        // Revert on failure
+        await fetchEmployeeTasks(true);
+      }
     } catch (err: any) {
       Alert.alert('Update failed', err.message || 'Could not update task status');
+      await fetchEmployeeTasks(true);
     }
   };
 
@@ -288,24 +363,27 @@ export default function Home() {
       return;
     }
 
-    try {
-      setIsTaskSaving(true);
-      const taskId = editingTask.id || editingTask._id;
+    const taskId = editingTask.id || editingTask._id;
+    
+    // Optimistic UI Update
+    setEmployeeTasks((prev) => prev.map((t) => ((t.id || t._id) === taskId ? { ...t, status: updateStatus } : t)));
+    setShowUpdateModal(false);
+    setEditingTask(null);
 
+    try {
       const response = await updateTaskStatus(taskId, updateStatus, updateSubTitle.trim(), updateSubDescription.trim() || undefined);
 
       if (!response.success) {
         Alert.alert('Update failed', response.message || 'Could not update task status');
+        await fetchEmployeeTasks(true); // Revert
         return;
       }
-
-      setShowUpdateModal(false);
-      setEditingTask(null);
-      await fetchEmployeeTasks();
+      
+      // Fetch in background to sync any other fields
+      fetchEmployeeTasks(true);
     } catch (err: any) {
       Alert.alert('Update failed', err.message || 'Could not update task');
-    } finally {
-      setIsTaskSaving(false);
+      await fetchEmployeeTasks(true); // Revert
     }
   };
 
@@ -330,11 +408,115 @@ export default function Home() {
           <Ionicons name="search" size={20} color="#666666" />
           <TextInput
             style={styles.searchInput}
-            placeholder={isEmployee ? 'Search your tasks' : 'Search here'}
+            placeholder="Search employees, tasks, clients..."
             value={searchQuery}
-            onChangeText={setSearchQuery}
+            onChangeText={handleSearchChange}
+            placeholderTextColor="#9CA3AF"
           />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => { setSearchQuery(''); setShowSearchResults(false); setGlobalResults({ employees: [], tasks: [], clients: [] }); }}>
+              <Ionicons name="close-circle" size={20} color="#9CA3AF" />
+            </TouchableOpacity>
+          )}
         </View>
+        {showSearchResults && (
+          <View style={styles.searchResultsOverlay}>
+            {isSearching ? (
+              <View style={styles.searchLoadingRow}>
+                <ActivityIndicator size="small" color="#111827" />
+                <Text style={styles.searchLoadingText}>Searching...</Text>
+              </View>
+            ) : totalResults === 0 ? (
+              <View style={styles.searchEmptyRow}>
+                <Ionicons name="search-outline" size={24} color="#9CA3AF" />
+                <Text style={styles.searchEmptyText}>No results for "{searchQuery}"</Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 350 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                {globalResults.employees.length > 0 && (
+                  <>
+                    <Text style={styles.searchSectionTitle}>Employees</Text>
+                    {globalResults.employees.map((emp: any) => (
+                      <TouchableOpacity
+                        key={emp.id}
+                        style={styles.searchResultItem}
+                        onPress={() => {
+                          setShowSearchResults(false);
+                          setSearchQuery('');
+                          router.push(`/employee-detail?id=${emp.id}` as any);
+                        }}
+                      >
+                        <View style={[styles.searchResultIcon, { backgroundColor: '#E8E4F3' }]}>
+                          <Ionicons name="person" size={16} color="#6B4EFF" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.searchResultName}>{emp.name}</Text>
+                          <Text style={styles.searchResultSub}>{emp.role} • {emp.email}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                )}
+                {globalResults.tasks.length > 0 && (
+                  <>
+                    <Text style={styles.searchSectionTitle}>Tasks</Text>
+                    {globalResults.tasks.map((task: any) => {
+                      const badge = statusBadge(task.status);
+                      return (
+                        <TouchableOpacity
+                          key={task.id}
+                          style={styles.searchResultItem}
+                          onPress={() => {
+                            setShowSearchResults(false);
+                            setSearchQuery('');
+                            router.push(`/task-detail?taskId=${task.id}` as any);
+                          }}
+                        >
+                          <View style={[styles.searchResultIcon, { backgroundColor: '#FEF3C7' }]}>
+                            <Ionicons name="document-text" size={16} color="#92400E" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.searchResultName}>{task.title}</Text>
+                            <Text style={styles.searchResultSub}>{task.clientName || 'No client'} • {badge.text}</Text>
+                          </View>
+                          <View style={[styles.searchResultBadge, { backgroundColor: badge.bg }]}>
+                            <Text style={[styles.searchResultBadgeText, { color: badge.color }]}>{badge.text}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </>
+                )}
+                {globalResults.clients.length > 0 && (
+                  <>
+                    <Text style={styles.searchSectionTitle}>Clients</Text>
+                    {globalResults.clients.map((client: any) => (
+                      <TouchableOpacity
+                        key={client.id}
+                        style={styles.searchResultItem}
+                        onPress={() => {
+                          setShowSearchResults(false);
+                          setSearchQuery('');
+                          router.push(`/client-detail?id=${client.id}` as any);
+                        }}
+                      >
+                        <View style={[styles.searchResultIcon, { backgroundColor: '#E4F4E8' }]}>
+                          <Ionicons name="briefcase" size={16} color="#4CAF50" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.searchResultName}>{client.name}</Text>
+                          <Text style={styles.searchResultSub}>{client.contactPerson || client.email || 'Client'}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color="#D1D5DB" />
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        )}
       </View>
 
       <ScrollView
@@ -417,7 +599,10 @@ export default function Home() {
                 </View>
 
                 <View style={styles.statsGrid}>
-                  <View style={[styles.statCard, { backgroundColor: '#A7F3D0' }]}>
+                  <TouchableOpacity 
+                    style={[styles.statCard, { backgroundColor: '#A7F3D0' }]}
+                    onPress={() => router.push('/list?tab=clients')}
+                  >
                     <View style={styles.statHeader}>
                       <Text style={styles.statTitleColor}>Total Active Clients</Text>
                       <Ionicons name="briefcase-outline" size={22} color="#000" />
@@ -426,7 +611,7 @@ export default function Home() {
                     <Text style={styles.statSubtextStyle}>
                       Active directory
                     </Text>
-                  </View>
+                  </TouchableOpacity>
 
                   <View style={[styles.statCard, { backgroundColor: '#8ECAFF' }]}>
                     <View style={styles.statHeader}>
@@ -437,14 +622,17 @@ export default function Home() {
                     <Text style={styles.statSubtextStyle}>{stats.overdueBills} overdue bills</Text>
                   </View>
 
-                  <View style={[styles.statCard, { backgroundColor: '#FDE46E' }]}>
+                  <TouchableOpacity 
+                    style={[styles.statCard, { backgroundColor: '#FDE46E' }]}
+                    onPress={() => router.push('/pending-tasks' as any)}
+                  >
                     <View style={styles.statHeader}>
                       <Text style={styles.statTitleColor}>Total Pending Tasks</Text>
                       <Ionicons name="document-text-outline" size={22} color="#000" />
                     </View>
                     <Text style={styles.statValueStyle}>{stats.totalPendingTasks}</Text>
                     <Text style={styles.statSubtextStyle}>Tasks to be completed</Text>
-                  </View>
+                  </TouchableOpacity>
 
                   <View style={[styles.statCard, { backgroundColor: '#FECACA' }]}>
                     <View style={styles.statHeader}>
@@ -724,6 +912,86 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 16,
     color: '#000000',
+  },
+  searchResultsOverlay: {
+    marginTop: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  searchLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 20,
+  },
+  searchLoadingText: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  searchEmptyRow: {
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 24,
+  },
+  searchEmptyText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    fontWeight: '500',
+  },
+  searchSectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9CA3AF',
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 6,
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  searchResultIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchResultName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  searchResultSub: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 1,
+  },
+  searchResultBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  searchResultBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   content: {
     flex: 1,

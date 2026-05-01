@@ -94,11 +94,13 @@ const getTaskCardTone = (task: TaskItem) => {
     case 'completed':
       return { backgroundColor: '#ECFDF3', borderColor: '#BBF7D0' };
     case 'in_progress':
-      return { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' };
+      return { backgroundColor: '#DBEAFE', borderColor: '#93C5FD' };
     case 'cancelled':
       return { backgroundColor: '#FEF2F2', borderColor: '#FECACA' };
+    case 'pending':
+      return { backgroundColor: '#FEF3C7', borderColor: '#FCD34D' };
     default:
-      return { backgroundColor: '#FFF7ED', borderColor: '#FED7AA' };
+      return { backgroundColor: '#FEF3C7', borderColor: '#FCD34D' };
   }
 };
 
@@ -185,11 +187,10 @@ function EmployeeProfileScreen() {
   }, []);
 
   const openCreateModal = () => {
-    setEditingTaskId(null);
-    setTaskTitle('');
-    setTaskDescription('');
-    setTaskStatus('pending');
-    setShowTaskModal(true);
+    router.push({
+      pathname: '/assign-task',
+      params: { employeeId: profileEmployeeId, employeeName: profileName }
+    });
   };
 
   const openEditModal = (task: TaskItem) => {
@@ -453,7 +454,6 @@ function EmployeeProfileScreen() {
           <View style={styles.profileInfo}>
             <Text style={styles.name}>{profileName}</Text>
             <Text style={styles.role}>{profileRole}</Text>
-            <Text style={styles.userIdLabel}>ID: {profileEmployeeId || '-'}</Text>
           </View>
         </View>
 
@@ -1028,12 +1028,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
-    height: 46,
+    height: 54,
     justifyContent: 'center',
   },
   statusPicker: {
     color: '#111827',
-    height: 46,
+    height: 54,
     backgroundColor: '#FFFFFF',
   },
   addBtn: {

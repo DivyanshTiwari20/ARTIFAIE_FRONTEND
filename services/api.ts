@@ -717,10 +717,12 @@ export const createTaskUpdate = async (taskId: string, data: {
 
 export const getNotifications = async (
   mode?: 'task' | 'general',
+  dateFilter?: string,
   options: GetRequestOptions = {}
 ) => {
   const params = new URLSearchParams();
   if (mode) params.append('mode', mode);
+  if (dateFilter) params.append('dateFilter', dateFilter);
   const qs = params.toString();
   return await apiGetWithCache(`/api/notifications${qs ? `?${qs}` : ''}`, {
     ttlMs: DEFAULT_NOTIFICATIONS_TTL_MS,
@@ -797,7 +799,7 @@ export const prefetchEssentialAppData = async (
     getEmployees(requestOptions),
     getClients(requestOptions),
     getTasks({}, requestOptions),
-    getNotifications(undefined, requestOptions),
+    getNotifications(undefined, 'today', requestOptions),
   ];
 
   if (role === 'admin' || role === 'manager') {
