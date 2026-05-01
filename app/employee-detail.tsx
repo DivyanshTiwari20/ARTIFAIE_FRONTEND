@@ -2,7 +2,7 @@ import Avatar from '@/components/common/Avatar';
 import { TaskListSkeleton } from '@/components/common/Skeleton';
 import { useAuth } from '@/context/AuthContext';
 import { isAdminOrManager } from '@/lib/roles';
-import { createTask, deleteTask, getTasks, updateTask, updateTaskStatus } from '@/services/api';
+import { createTask, deleteTask, getTasks, updateTask, updateTaskStatus, onGlobalRefresh } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -144,7 +144,7 @@ function EmployeeProfileScreen() {
   const profileRole = String(params.role || user?.role || 'Team Member');
   const profileAvatar = String(params.avatar || (user as any)?.profileImageUrl || (user as any)?.avatar || '');
 
-  const fetchTasks = useCallback(async () => {
+  const fetchTasks = useCallback(async (forceRefresh = false) => {
     if (!profileEmployeeId) {
       setTasks([]);
       setIsLoading(false);
@@ -152,8 +152,10 @@ function EmployeeProfileScreen() {
     }
 
     try {
-      setIsLoading(true);
-      const res = await getTasks({}, { forceRefresh: true, staleWhileRevalidate: false });
+      if (!tasks.length || forceRefresh) {
+        setIsLoading(true);
+      }
+      const res = await getTasks({}, { forceRefresh, staleWhileRevalidate: !forceRefresh });
 
       if (res?.success) {
         let nextTasks = Array.isArray(res.data)
@@ -178,7 +180,13 @@ function EmployeeProfileScreen() {
   }, [isSelfProfile, profileEmployeeId]);
 
   useEffect(() => {
-    void fetchTasks();
+    void fetchTasks(false);
+
+    const unsubscribe = onGlobalRefresh(() => {
+      void fetchTasks(true);
+    });
+
+    return () => unsubscribe();
   }, [fetchTasks]);
 
   const exitSelectionMode = useCallback(() => {

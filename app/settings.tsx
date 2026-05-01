@@ -59,6 +59,12 @@ export default function Settings() {
       onPress: () => router.push('/update-password'),
     },
     {
+      id: 'devices',
+      title: 'Active Devices',
+      icon: 'phone-portrait-outline',
+      onPress: () => router.push('/active-devices'),
+    },
+    {
       id: 'help',
       title: 'Help & Support',
       icon: 'help-circle-outline',

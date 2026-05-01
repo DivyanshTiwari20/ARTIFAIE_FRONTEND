@@ -1,6 +1,6 @@
 import { DetailSkeleton } from '@/components/common/Skeleton';
 import { formatNameWithPrefix } from '@/lib/namePrefix';
-import { getClient, getEmployees } from '@/services/api';
+import { getClient, getEmployees, onGlobalRefresh } from '@/services/api';
 
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -83,6 +83,12 @@ export default function ClientDetailScreen() {
 
   useEffect(() => {
     void fetchClient(false);
+
+    const unsubscribe = onGlobalRefresh(() => {
+      void fetchClient(true);
+    });
+
+    return () => unsubscribe();
   }, [fetchClient]);
 
   const onRefresh = useCallback(() => {

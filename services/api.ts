@@ -132,15 +132,32 @@ const clearApiCache = async () => {
   }
 };
 
+// ------------------------------------------
+// Global Event Bus for Instant Refresh
+// ------------------------------------------
+type GlobalRefreshListener = () => void;
+const globalRefreshListeners = new Set<GlobalRefreshListener>();
+
+export const onGlobalRefresh = (listener: GlobalRefreshListener) => {
+  globalRefreshListeners.add(listener);
+  return () => globalRefreshListeners.delete(listener);
+};
+
+export const triggerGlobalRefresh = () => {
+  globalRefreshListeners.forEach((l) => l());
+};
+
 const invalidateApiCacheEntries = async (endpointMatchers: string[]) => {
   if (endpointMatchers.length === 0) return;
 
   const shouldInvalidate = (key: string) => endpointMatchers.some((matcher) => key.includes(matcher));
 
+  let didInvalidate = false;
   for (const key of Array.from(inMemoryCache.keys())) {
     if (shouldInvalidate(key)) {
       inMemoryCache.delete(key);
       pendingNetworkRequests.delete(key);
+      didInvalidate = true;
     }
   }
 
@@ -149,9 +166,15 @@ const invalidateApiCacheEntries = async (endpointMatchers: string[]) => {
     const keysToRemove = allKeys.filter((k) => k.startsWith(`${API_CACHE_PREFIX}:`) && shouldInvalidate(k));
     if (keysToRemove.length > 0) {
       await AsyncStorage.multiRemove(keysToRemove);
+      didInvalidate = true;
     }
   } catch {
     // Ignore cache invalidation errors
+  }
+
+  // If cache was invalidated, trigger a global refresh across the app
+  if (didInvalidate) {
+    triggerGlobalRefresh();
   }
 };
 
@@ -363,10 +386,32 @@ export class ApiError extends Error {
 // ------------------------------------------
 // Auth API
 // ------------------------------------------
+import { Platform } from 'react-native';
+import * as Device from 'expo-device';
+
+const SESSION_TOKEN_KEY = 'device_session_token';
+
+async function getOrCreateSessionToken(): Promise<string> {
+  try {
+    let token = await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
+    if (!token) {
+      token = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+      await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token);
+    }
+    return token;
+  } catch {
+    return 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+  }
+}
+
 export async function loginApi(email: string, password: string) {
+  const sessionToken = await getOrCreateSessionToken();
+  const deviceName = Device.modelName || Device.deviceName || `${Platform.OS} device`;
+  const platform = Platform.OS;
+
   const response = await apiFetch('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, sessionToken, deviceName, platform }),
   });
 
   if (response.success && response.token) {
@@ -688,16 +733,25 @@ export const deleteTask = async (id: string) => {
   return response;
 };
 
-export const getTaskCounts = async () => {
-  return await apiFetch('/api/tasks/user/counts');
+export const getTaskCounts = async (options: GetRequestOptions = {}) => {
+  return await apiGetWithCache('/api/tasks/user/counts', {
+    ttlMs: DEFAULT_USER_DATA_TTL_MS,
+    ...options,
+  });
 };
 
-export const getTaskDetail = async (taskId: string) => {
-  return await apiFetch(`/api/tasks/${taskId}`);
+export const getTaskDetail = async (taskId: string, options: GetRequestOptions = {}) => {
+  return await apiGetWithCache(`/api/tasks/${taskId}`, {
+    ttlMs: DEFAULT_USER_DATA_TTL_MS,
+    ...options,
+  });
 };
 
-export const getTaskUpdates = async (taskId: string) => {
-  return await apiFetch(`/api/tasks/${taskId}/updates`);
+export const getTaskUpdates = async (taskId: string, options: GetRequestOptions = {}) => {
+  return await apiGetWithCache(`/api/tasks/${taskId}/updates`, {
+    ttlMs: DEFAULT_USER_DATA_TTL_MS,
+    ...options,
+  });
 };
 
 export const createTaskUpdate = async (taskId: string, data: {
@@ -817,7 +871,24 @@ export const prefetchEssentialAppData = async (
 };
 export { API_BASE_URL };
 
+// ------------------------------------------
+// Sessions API (Active Devices)
+// ------------------------------------------
+export async function getActiveSessions() {
+  return apiFetch('/api/sessions');
+}
 
+export async function logoutSession(sessionId: string) {
+  return apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+}
+
+export async function getCurrentSessionToken(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
 
 
 

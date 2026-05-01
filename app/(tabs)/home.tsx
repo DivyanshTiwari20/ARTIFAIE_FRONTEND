@@ -10,6 +10,7 @@ import {
   getClients,
   getTaskCounts,
   getEmployees,
+  onGlobalRefresh,
 } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -248,7 +249,14 @@ export default function Home() {
       loadData(true);
     }, HOME_REFRESH_INTERVAL_MS);
 
-    return () => clearInterval(intervalId);
+    const unsubscribeGlobal = onGlobalRefresh(() => {
+      loadData(true);
+    });
+
+    return () => {
+      clearInterval(intervalId);
+      unsubscribeGlobal();
+    };
   }, [loadData]);
 
   const onRefresh = useCallback(() => {

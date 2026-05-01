@@ -1,6 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
 import { isAdminOrManager } from '@/lib/roles';
-import { createTaskUpdate, getTaskDetail, updateTaskStatus } from '@/services/api';
+import { createTaskUpdate, getTaskDetail, updateTaskStatus, onGlobalRefresh } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -130,7 +130,7 @@ export default function TaskDetailScreen() {
   const [updateStatus, setUpdateStatus] = useState<string>('pending');
   const [isSaving, setIsSaving] = useState(false);
 
-  const fetchTask = useCallback(async () => {
+  const fetchTask = useCallback(async (forceRefresh = false) => {
     if (!taskId) {
       setError('No task ID provided');
       setIsLoading(false);
@@ -138,9 +138,11 @@ export default function TaskDetailScreen() {
     }
 
     try {
-      setIsLoading(true);
+      if (!task || forceRefresh) {
+        setIsLoading(true);
+      }
       setError(null);
-      const res = await getTaskDetail(taskId);
+      const res = await getTaskDetail(taskId, { forceRefresh, staleWhileRevalidate: !forceRefresh });
       if (res.success && res.data) {
         setTask(res.data as TaskDetail);
       } else {
@@ -154,7 +156,13 @@ export default function TaskDetailScreen() {
   }, [taskId]);
 
   useEffect(() => {
-    fetchTask();
+    fetchTask(false);
+
+    const unsubscribe = onGlobalRefresh(() => {
+      fetchTask(true);
+    });
+
+    return () => unsubscribe();
   }, [fetchTask]);
 
   const openUpdateModal = () => {

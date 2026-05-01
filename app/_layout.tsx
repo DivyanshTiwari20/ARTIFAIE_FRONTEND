@@ -34,6 +34,7 @@ export default function RootLayout() {
             <Stack.Screen name="help-support" options={{ headerShown: false }} />
             <Stack.Screen name="faq" options={{ headerShown: false }} />
             <Stack.Screen name="about" options={{ headerShown: false }} />
+            <Stack.Screen name="active-devices" options={{ headerShown: false }} />
           </Stack>
         </View>
       </AuthProvider>

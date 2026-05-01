@@ -1,7 +1,7 @@
 import EmployeeCard from '@/components/list/EmployeeCard';
 import { useAuth } from '@/context/AuthContext';
 import { isAdminOrManager } from '@/lib/roles';
-import { getClients, getEmployees } from '@/services/api';
+import { getClients, getEmployees, onGlobalRefresh } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -116,6 +116,16 @@ export default function List() {
     } else if (activeTab === 'employees' && employees.length === 0 && isAdminOrManager(user?.role)) {
       void fetchEmployees(false);
     }
+
+    const unsubscribe = onGlobalRefresh(() => {
+      if (activeTab === 'clients') {
+        void fetchClients(true);
+      } else {
+        void fetchEmployees(true);
+      }
+    });
+
+    return () => unsubscribe();
   }, [activeTab, clients.length, employees.length, fetchClients, fetchEmployees, user?.role]);
 
   const onRefresh = useCallback(() => {
