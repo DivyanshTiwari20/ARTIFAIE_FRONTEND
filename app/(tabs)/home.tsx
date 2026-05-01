@@ -3,22 +3,24 @@ import { isAdminOrManager, isEmployeeRole, normalizeRole } from '@/lib/roles';
 import {
   getBankPosition,
   getClientBilling,
+  getClients,
+  getEmployees,
   getProfitLoss,
   getReceivables,
-  getTasks,
-  updateTaskStatus,
-  getClients,
   getTaskCounts,
-  getEmployees,
+  getTasks,
   onGlobalRefresh,
+  updateTaskStatus,
 } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -26,8 +28,6 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 
 const formatINR = (amount: number): string => {
@@ -188,11 +188,11 @@ export default function Home() {
       nextStats.paidInvoices = data?.summary?.paidCount || 0;
       nextStats.unpaidInvoices = (data?.summary?.partialCount || 0) + (data?.summary?.unpaidCount || 0);
     }
-    
+
     if (clientsRes.status === 'fulfilled' && clientsRes.value.success) {
       nextStats.totalClients = clientsRes.value.data?.length || 0;
     }
-    
+
     if (taskCountsRes.status === 'fulfilled' && taskCountsRes.value.success) {
       const counts = taskCountsRes.value.data;
       nextStats.totalPendingTasks = Number(counts?.pending || 0) + Number(counts?.in_progress || 0);
@@ -293,26 +293,26 @@ export default function Home() {
 
       const employees = (empRes.status === 'fulfilled' && empRes.value.success)
         ? (empRes.value.data || []).filter((e: any) =>
-            (e.name || '').toLowerCase().includes(q) ||
-            (e.email || '').toLowerCase().includes(q) ||
-            (e.role || '').toLowerCase().includes(q)
-          ).slice(0, 5)
+          (e.name || '').toLowerCase().includes(q) ||
+          (e.email || '').toLowerCase().includes(q) ||
+          (e.role || '').toLowerCase().includes(q)
+        ).slice(0, 5)
         : [];
 
       const tasks = (taskRes.status === 'fulfilled' && taskRes.value.success)
         ? (taskRes.value.data || []).filter((t: any) =>
-            (t.title || '').toLowerCase().includes(q) ||
-            (t.description || '').toLowerCase().includes(q) ||
-            (t.clientName || '').toLowerCase().includes(q)
-          ).slice(0, 5)
+          (t.title || '').toLowerCase().includes(q) ||
+          (t.description || '').toLowerCase().includes(q) ||
+          (t.clientName || '').toLowerCase().includes(q)
+        ).slice(0, 5)
         : [];
 
       const clients = (clientRes.status === 'fulfilled' && clientRes.value.success)
         ? (clientRes.value.data || []).filter((c: any) =>
-            (c.name || '').toLowerCase().includes(q) ||
-            (c.contactPerson || '').toLowerCase().includes(q) ||
-            (c.email || '').toLowerCase().includes(q)
-          ).slice(0, 5)
+          (c.name || '').toLowerCase().includes(q) ||
+          (c.contactPerson || '').toLowerCase().includes(q) ||
+          (c.email || '').toLowerCase().includes(q)
+        ).slice(0, 5)
         : [];
 
       setGlobalResults({ employees, tasks, clients });
@@ -343,7 +343,7 @@ export default function Home() {
       setOpenMenuTaskId(null);
       // Optimistic update
       setEmployeeTasks((prev) => prev.map((t) => ((t.id || t._id) === taskId ? { ...t, status } : t)));
-      
+
       const res = await updateTaskStatus(taskId, status);
       if (!res.success) {
         // Revert on failure
@@ -372,7 +372,7 @@ export default function Home() {
     }
 
     const taskId = editingTask.id || editingTask._id;
-    
+
     // Optimistic UI Update
     setEmployeeTasks((prev) => prev.map((t) => ((t.id || t._id) === taskId ? { ...t, status: updateStatus } : t)));
     setShowUpdateModal(false);
@@ -386,7 +386,7 @@ export default function Home() {
         await fetchEmployeeTasks(true); // Revert
         return;
       }
-      
+
       // Fetch in background to sync any other fields
       fetchEmployeeTasks(true);
     } catch (err: any) {
@@ -607,7 +607,7 @@ export default function Home() {
                 </View>
 
                 <View style={styles.statsGrid}>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={[styles.statCard, { backgroundColor: '#A7F3D0' }]}
                     onPress={() => router.push('/list?tab=clients')}
                   >
@@ -630,7 +630,7 @@ export default function Home() {
                     <Text style={styles.statSubtextStyle}>{stats.overdueBills} overdue bills</Text>
                   </View>
 
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={[styles.statCard, { backgroundColor: '#FDE46E' }]}
                     onPress={() => router.push('/pending-tasks' as any)}
                   >

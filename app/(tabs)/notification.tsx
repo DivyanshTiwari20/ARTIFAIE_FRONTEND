@@ -1,7 +1,7 @@
 import NotificationCard from '@/components/notification/NotificationCard';
 import { NotificationListSkeleton } from '@/components/common/Skeleton';
 import { normalizeNotificationsList } from '@/lib/notifications';
-import { getNotifications, getTask, markAllNotificationsRead, markNotificationRead } from '@/services/api';
+import { getNotifications, getTask, markAllNotificationsRead, markNotificationRead, onGlobalRefresh } from '@/services/api';
 import { Notification, NotificationFilter } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { isAdminOrManager } from '@/lib/roles';
@@ -34,6 +34,9 @@ export default function NotificationPage() {
   const fetchNotifications = useCallback(async (forceRefresh = false) => {
     if (!user) return;
     try {
+      if (forceRefresh || notifications.length === 0) {
+        setIsLoading(true);
+      }
       setFetchError(null);
       const res = await getNotifications(showModeToggle ? mode : undefined, selectedFilter, {
         forceRefresh,
@@ -62,19 +65,24 @@ export default function NotificationPage() {
 
   useEffect(() => {
     if (!user) return;
-    setIsLoading(true);
-    // Use false to allow cache to return data instantly
     fetchNotifications(false);
     const intervalId = setInterval(() => {
       fetchNotifications(true);
     }, NOTIFICATION_REFRESH_INTERVAL_MS);
-    return () => clearInterval(intervalId);
+
+    const unsubscribeGlobal = onGlobalRefresh(() => {
+      fetchNotifications(true);
+    });
+
+    return () => {
+      clearInterval(intervalId);
+      unsubscribeGlobal();
+    };
   }, [fetchNotifications, user]);
 
   // Fetch when filter changes
   useEffect(() => {
     if (user) {
-      setIsLoading(true);
       fetchNotifications(false);
     }
   }, [selectedFilter, mode]);
